@@ -1,29 +1,73 @@
-# README #
+# Agents Workflow CLI
 
-This README would normally document whatever steps are necessary to get your application up and running.
+CLI tool for managing and executing workflows on the Agents Platform.
 
-### What is this repository for? ###
+## Prerequisites
 
-* Quick summary
-* Version
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
+- **Python** >= 3.13
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
 
-### How do I get set up? ###
+## Quick Start
 
-* Summary of set up
-* Configuration
-* Dependencies
-* Database configuration
-* How to run tests
-* Deployment instructions
+```bash
+# Install dependencies
+uv sync --all-groups
 
-### Contribution guidelines ###
+# Run the CLI
+uv run workflow --help
 
-* Writing tests
-* Code review
-* Other guidelines
+# Or run as a Python module
+uv run python -m cli --help
+```
 
-### Who do I talk to? ###
+## Development
 
-* Repo owner or admin
-* Other community or team contact
+```bash
+# Install all dependencies (including dev tools)
+uv sync --all-groups
+
+# Run linter
+uv run ruff check .
+
+# Run formatter
+uv run ruff format .
+
+# Auto-fix lint issues
+uv run ruff check . --fix
+
+# Run tests
+uv run pytest
+
+# Install pre-commit hooks
+uv run pre-commit install
+```
+
+## Project Structure
+
+```
+workflow-cli/
+  pyproject.toml            # Package configuration (uv-managed)
+  src/
+    cli/
+      __init__.py           # Package init with version
+      __main__.py           # Enables `python -m cli`
+      main.py               # Typer app entry point
+  tests/
+    conftest.py             # Shared test fixtures
+  .pre-commit-config.yaml   # Pre-commit hook configuration
+  README.md                 # This file
+```
+
+## Usage
+
+```bash
+# Show help
+uv run workflow --help
+
+# Show version
+uv run workflow --version
+
+# Run a command
+uv run workflow hello
+uv run workflow hello "Agents Platform"
+```
