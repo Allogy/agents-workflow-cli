@@ -1,0 +1,63 @@
+[project]
+name = "agents-workflow-cli"
+version = "0.1.0"
+description = "CLI tool for managing and executing workflows on the Agents Platform"
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "agents-workflow-models",
+]
+
+[tool.uv.sources]
+agents-workflow-models = { path = "shared-models", editable = true }
+
+[project.scripts]
+workflow = "cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cli"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/cli"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults (for Typer)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cli"]
