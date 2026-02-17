@@ -7,7 +7,11 @@ requires-python = ">=3.13,<4.0"
 dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
+    "agents-workflow-models",
 ]
+
+[tool.uv.sources]
+agents-workflow-models = { path = "shared-models", editable = true }
 
 [project.scripts]
 workflow = "cli.main:app"
