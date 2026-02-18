@@ -1,0 +1,105 @@
+# Bitbucket Pipelines – Workflow CLI & Shared Models
+#
+# Publishes to AWS CodeArtifact on version tags.
+# Required pipeline variables (set in Bitbucket repo settings):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#
+# Defaults (override via pipeline variables if needed):
+#   CODEARTIFACT_DOMAIN     = agents-platform
+#   CODEARTIFACT_REPO       = agents-python-packages
+#   CODEARTIFACT_OWNER      = 522946686627
+#   CODEARTIFACT_REGION     = us-east-1
+
+image: python:3.13-slim
+
+definitions:
+  steps:
+    - step: &install-tools
+        name: Install tools
+        script:
+          - apt-get update && apt-get install -y --no-install-recommends curl unzip
+          - curl -LsSf https://astral.sh/uv/install.sh | sh
+          - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+          - curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+          - unzip -q awscliv2.zip && ./aws/install
+
+pipelines:
+  tags:
+    cli-v*:
+      - step:
+          name: Publish CLI to CodeArtifact
+          script:
+            # --- Install uv + AWS CLI ---
+            - apt-get update && apt-get install -y --no-install-recommends curl unzip
+            - curl -LsSf https://astral.sh/uv/install.sh | sh
+            - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+            - curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+            - unzip -q awscliv2.zip && ./aws/install
+
+            # --- Defaults ---
+            - export CODEARTIFACT_DOMAIN="${CODEARTIFACT_DOMAIN:-agents-platform}"
+            - export CODEARTIFACT_REPO="${CODEARTIFACT_REPO:-agents-python-packages}"
+            - export CODEARTIFACT_OWNER="${CODEARTIFACT_OWNER:-522946686627}"
+            - export CODEARTIFACT_REGION="${CODEARTIFACT_REGION:-us-east-1}"
+
+            # --- Validate release ---
+            - python scripts/release/validate_release.py --package cli --tag "$BITBUCKET_TAG"
+
+            # --- Publish ---
+            - >-
+              export UV_PUBLISH_URL=$(aws codeartifact get-repository-endpoint
+              --domain "$CODEARTIFACT_DOMAIN"
+              --domain-owner "$CODEARTIFACT_OWNER"
+              --repository "$CODEARTIFACT_REPO"
+              --format pypi
+              --region "$CODEARTIFACT_REGION"
+              --query repositoryEndpoint --output text)
+            - >-
+              export UV_PUBLISH_PASSWORD=$(aws codeartifact get-authorization-token
+              --domain "$CODEARTIFACT_DOMAIN"
+              --domain-owner "$CODEARTIFACT_OWNER"
+              --region "$CODEARTIFACT_REGION"
+              --query authorizationToken --output text)
+            - export UV_PUBLISH_USERNAME=aws
+            - uv build
+            - uv publish
+
+    models-v*:
+      - step:
+          name: Publish Shared Models to CodeArtifact
+          script:
+            # --- Install uv + AWS CLI ---
+            - apt-get update && apt-get install -y --no-install-recommends curl unzip
+            - curl -LsSf https://astral.sh/uv/install.sh | sh
+            - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+            - curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+            - unzip -q awscliv2.zip && ./aws/install
+
+            # --- Defaults ---
+            - export CODEARTIFACT_DOMAIN="${CODEARTIFACT_DOMAIN:-agents-platform}"
+            - export CODEARTIFACT_REPO="${CODEARTIFACT_REPO:-agents-python-packages}"
+            - export CODEARTIFACT_OWNER="${CODEARTIFACT_OWNER:-522946686627}"
+            - export CODEARTIFACT_REGION="${CODEARTIFACT_REGION:-us-east-1}"
+
+            # --- Validate release ---
+            - python scripts/release/validate_release.py --package models --tag "$BITBUCKET_TAG"
+
+            # --- Publish ---
+            - >-
+              export UV_PUBLISH_URL=$(aws codeartifact get-repository-endpoint
+              --domain "$CODEARTIFACT_DOMAIN"
+              --domain-owner "$CODEARTIFACT_OWNER"
+              --repository "$CODEARTIFACT_REPO"
+              --format pypi
+              --region "$CODEARTIFACT_REGION"
+              --query repositoryEndpoint --output text)
+            - >-
+              export UV_PUBLISH_PASSWORD=$(aws codeartifact get-authorization-token
+              --domain "$CODEARTIFACT_DOMAIN"
+              --domain-owner "$CODEARTIFACT_OWNER"
+              --region "$CODEARTIFACT_REGION"
+              --query authorizationToken --output text)
+            - export UV_PUBLISH_USERNAME=aws
+            - cd shared-models
+            - uv build
+            - uv publish
