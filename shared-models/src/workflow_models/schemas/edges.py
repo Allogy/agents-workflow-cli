@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from workflow_models.enums import EdgeType
 
@@ -32,6 +32,8 @@ class LogicalEdgeUpdate(BaseModel):
 
 class LogicalEdgePublic(BaseModel):
     """Schema for public logical edge representation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     workflow_id: UUID

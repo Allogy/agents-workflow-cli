@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from workflow_models.enums import PathType
 
@@ -30,6 +30,8 @@ class WorkflowVisualsUpdate(BaseModel):
 
 class WorkflowVisualsPublic(BaseModel):
     """Schema for public workflow visuals representation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     canvas_version: str = Field(default='2.0', max_length=10)
@@ -69,6 +71,8 @@ class NodeVisualsUpdate(BaseModel):
 class NodeVisualsPublic(BaseModel):
     """Schema for public node visuals representation."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     workflow_id: UUID
     position_x: float
@@ -105,6 +109,8 @@ class EdgeVisualsUpdate(BaseModel):
 
 class EdgeVisualsPublic(BaseModel):
     """Schema for public edge visuals representation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID  # The ID is the edge's ID
     workflow_id: UUID

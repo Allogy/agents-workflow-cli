@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from workflow_models.enums import ExecutionMode, NodeConfigType, StepExecutionType
 
@@ -49,6 +49,8 @@ class LogicalNodeUpdate(BaseModel):
 class LogicalNodePublic(BaseModel):
     """Schema for public logical node representation."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     workflow_id: UUID
     workflow_version: int
@@ -81,6 +83,8 @@ class LogicalNodeInputCreate(BaseModel):
 class LogicalNodeInputPublic(BaseModel):
     """Schema for public logical node input representation."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     node_id: UUID
     workflow_id: UUID
@@ -99,6 +103,8 @@ class LogicalNodeOutputCreate(BaseModel):
 
 class LogicalNodeOutputPublic(BaseModel):
     """Schema for public logical node output representation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     node_id: UUID

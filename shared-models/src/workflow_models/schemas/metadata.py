@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkflowMetadataCreate(BaseModel):
@@ -32,6 +32,8 @@ class WorkflowMetadataUpdate(BaseModel):
 
 class WorkflowMetadataPublic(BaseModel):
     """Schema for public workflow metadata representation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     workflow_id: UUID
     owner_id: UUID | None
