@@ -1,0 +1,38 @@
+# text-to-agent.workflow.yaml
+# Template: Plain text -> Agent
+# The simplest agent workflow: free-text input processed by an agent.
+
+name: Text to Agent
+description: Plain text input routed directly to an agent
+version: 1
+tags:
+  - template
+  - agent
+
+nodes:
+  user_input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Enter Your Message
+    config:
+      placeholder: Type your message here...
+
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    label: Assistant Agent
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      system_prompt: >
+        You are a helpful assistant. Respond to the user's message
+        clearly and concisely.
+      temperature: 0.7
+      maxTokens: 2048
+      tools: []
+
+edges:
+  - from: user_input
+    to: agent
+
+entry: user_input
+exit: agent

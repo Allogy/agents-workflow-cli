@@ -1,0 +1,64 @@
+# batch-processing.workflow.yaml
+# Template: Text input -> LLM processing pipeline
+# Accepts a text list as input and processes it through an LLM call.
+# Note: For true iteration, use conditional edges or orchestrate externally.
+
+name: Batch Processing Pipeline
+description: Text input processed through an LLM pipeline for batch-style operations
+version: 1
+tags:
+  - template
+  - batch
+  - processing
+
+nodes:
+  text_input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Enter Items
+    config:
+      placeholder: "Enter items to process (one per line)..."
+
+  llm_process:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Process Items
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.3
+      maxTokens: 4096
+      template: |
+        Process each of the following items individually and provide
+        a structured response for each one:
+
+        {{text_input.output.text}}
+
+        For each item, provide:
+        - Item: the original text
+        - Result: your processed output
+        - Status: success or needs_review
+
+  llm_summarize:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Summarize Results
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.3
+      maxTokens: 2048
+      template: |
+        Summarize the batch processing results below into a final report:
+
+        {{llm_process.output.text}}
+
+        Include total items processed, success rate, and any items
+        that need further review.
+
+edges:
+  - from: text_input
+    to: llm_process
+  - from: llm_process
+    to: llm_summarize
+
+entry: text_input
+exit: llm_summarize

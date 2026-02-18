@@ -1,0 +1,48 @@
+# simple-form.workflow.yaml
+# Template: Form input -> Agent processing
+# A structured form collects user input, then an agent processes it.
+
+name: Simple Form Workflow
+description: Structured form input routed to an agent for processing
+version: 1
+tags:
+  - template
+  - form
+
+nodes:
+  form_input:
+    type: structured_input
+    execution_mode: INPUT
+    label: User Form
+    config:
+      schema:
+        type: object
+        properties:
+          request:
+            title: Request
+            type: string
+          context:
+            title: Additional Context
+            type: string
+        required:
+          - request
+
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    label: Processing Agent
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      system_prompt: >
+        You are a helpful assistant. Process the user's form submission
+        and provide a thorough response based on their request and context.
+      temperature: 0.7
+      maxTokens: 2048
+      tools: []
+
+edges:
+  - from: form_input
+    to: agent
+
+entry: form_input
+exit: agent

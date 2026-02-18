@@ -1,0 +1,58 @@
+# rag-qa.workflow.yaml
+# Template: Question -> Vector search -> LLM answer
+# Classic RAG pattern: user asks a question, relevant docs are retrieved,
+# and an LLM generates an answer grounded in the retrieved context.
+
+name: RAG Question & Answer
+description: Question answering with retrieval-augmented generation (RAG)
+version: 1
+tags:
+  - template
+  - rag
+  - qa
+
+nodes:
+  question:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Ask a Question
+    config:
+      placeholder: Enter your question...
+
+  retrieve:
+    type: retrieve
+    execution_mode: FLOW
+    label: Search Knowledge Base
+    config:
+      knowledgeBaseId: YOUR_KNOWLEDGE_BASE_ID
+      topK: 5
+      scoreThreshold: 0.5
+
+  answer:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Generate Answer
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.3
+      maxTokens: 2048
+      system_prompt: >
+        You are a helpful assistant that answers questions based on
+        the provided context. If the context doesn't contain enough
+        information, say so clearly.
+      template: |
+        Context from knowledge base:
+        {{retrieve.output.results}}
+
+        Question: {{question.output.text}}
+
+        Provide a clear, accurate answer based on the context above.
+
+edges:
+  - from: question
+    to: retrieve
+  - from: retrieve
+    to: answer
+
+entry: question
+exit: answer

@@ -1,0 +1,78 @@
+# form-with-review.workflow.yaml
+# Template: Form -> LLM -> Human approval gate
+# Structured input processed by an LLM, then routed to a human reviewer.
+
+name: Form with Human Review
+description: Form input processed by LLM, then routed for human approval
+version: 1
+tags:
+  - template
+  - form
+  - review
+
+nodes:
+  form_input:
+    type: structured_input
+    execution_mode: INPUT
+    label: Submit Request
+    config:
+      schema:
+        type: object
+        properties:
+          title:
+            title: Request Title
+            type: string
+          description:
+            title: Description
+            type: string
+          priority:
+            title: Priority
+            type: string
+            enum:
+              - low
+              - medium
+              - high
+        required:
+          - title
+          - description
+
+  llm_process:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Process Request
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.5
+      maxTokens: 2048
+      template: |
+        Review the following request and provide a structured assessment:
+
+        Title: {{form_input.output.title}}
+        Description: {{form_input.output.description}}
+
+        Provide:
+        1. A brief summary
+        2. Risk assessment
+        3. Recommended action
+
+  human_review:
+    type: human_review
+    execution_mode: FLOW
+    label: Manager Approval
+    config:
+      review_prompt: >
+        Review the LLM assessment and the original request.
+        Approve to proceed or reject to send back for revision.
+      timeoutMinutes: 1440
+      allowApprove: true
+      allowReject: true
+      allowEdit: false
+
+edges:
+  - from: form_input
+    to: llm_process
+  - from: llm_process
+    to: human_review
+
+entry: form_input
+exit: human_review

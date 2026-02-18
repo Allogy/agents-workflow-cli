@@ -1,0 +1,61 @@
+# document-analysis.workflow.yaml
+# Template: File upload -> Vector search -> LLM analysis
+# Upload a document, retrieve relevant context, and analyze with an LLM.
+
+name: Document Analysis
+description: Upload a document, retrieve related context, and analyze with an LLM
+version: 1
+tags:
+  - template
+  - document
+  - rag
+
+nodes:
+  file_upload:
+    type: file_upload
+    execution_mode: INPUT
+    label: Upload Document
+    config:
+      acceptedFormats:
+        - pdf
+        - docx
+        - txt
+      maxFileSize: 10485760
+      textExtraction: automatic
+      extractTables: true
+
+  retrieve:
+    type: retrieve
+    execution_mode: FLOW
+    label: Search Knowledge Base
+    config:
+      knowledgeBaseId: YOUR_KNOWLEDGE_BASE_ID
+      topK: 5
+      scoreThreshold: 0.5
+
+  llm_analysis:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Analyze Document
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.3
+      maxTokens: 4096
+      template: |
+        Analyze the following document content:
+        {{file_upload.output.text}}
+
+        Using the following related context:
+        {{retrieve.output.results}}
+
+        Provide a comprehensive analysis including key findings,
+        important details, and any recommendations.
+
+edges:
+  - from: file_upload
+    to: retrieve
+  - from: retrieve
+    to: llm_analysis
+
+entry: file_upload
+exit: llm_analysis

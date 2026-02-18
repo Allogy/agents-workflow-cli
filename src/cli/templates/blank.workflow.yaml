@@ -1,0 +1,22 @@
+# blank.workflow.yaml
+# Template: Empty workflow with just an entry/exit node
+# A minimal starting point — add your own nodes and edges.
+
+name: Blank Workflow
+description: Empty workflow — add your own nodes and edges
+version: 1
+tags:
+  - template
+
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Input
+    config:
+      placeholder: Enter text...
+
+edges: []
+
+entry: input
+exit: input
