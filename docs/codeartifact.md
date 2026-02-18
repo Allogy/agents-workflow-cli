@@ -180,6 +180,55 @@ Tests covering these checks live in `tests/test_release_validation.py`.
    make codeartifact-publish-models
    ```
 
+## Docker Build Integration
+
+The backend Docker image installs `agents-workflow-models` from CodeArtifact
+instead of copying the source from the monorepo. This is handled transparently
+via BuildKit secrets and `UV_NO_SOURCES`.
+
+### How it works
+
+1. `backend/pyproject.toml` declares a named `codeartifact` index alongside
+   the existing local path source in `[tool.uv.sources]`
+2. The Dockerfile sets `UV_NO_SOURCES=1` which tells uv to ignore the local
+   path source and resolve packages from the CodeArtifact index instead
+3. The CodeArtifact auth token is injected via `--mount=type=secret` so it
+   never appears in image layers
+4. `uv lock --no-sources` re-resolves the lockfile without path sources,
+   then `uv sync` installs everything from the index
+
+### Local development
+
+Locally, `uv sync` uses the `[tool.uv.sources]` path source as usual:
+
+```bash
+cd backend
+uv sync --all-groups   # Uses ../workflow-cli/shared-models (editable)
+```
+
+### Building Docker images
+
+**Via docker compose** (local development):
+
+```bash
+# Set the CodeArtifact token (or add to .env)
+export CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token \
+  --domain agents-platform --domain-owner 522946686627 \
+  --region us-east-1 --query authorizationToken --output text)
+
+docker compose build agents-api
+
+# Or use make (auto-fetches the token):
+make build
+```
+
+**Via devops Makefile** (CI/production):
+
+```bash
+cd backend/devops/app-stack
+make build   # Auto-fetches CodeArtifact token and passes as secret
+```
+
 ## Troubleshooting
 
 ### "Package already exists" error during publish
@@ -196,3 +245,26 @@ permissions. Run `aws sts get-caller-identity` to verify.
 ### Auth token expired
 
 CodeArtifact tokens expire after 12 hours. Run `make codeartifact-login` again.
+
+### Docker build fails with "No solution found" for agents-workflow-models
+
+Ensure the package version in `backend/pyproject.toml` is published to
+CodeArtifact. Check with:
+
+```bash
+make codeartifact-login
+# Use the token/endpoint to browse available versions
+```
+
+If you recently bumped the version, publish first:
+
+```bash
+make codeartifact-publish-models
+```
+
+### Docker build fails with "secret not found: codeartifact_token"
+
+The build requires a CodeArtifact auth token. Either:
+
+- Set `CODEARTIFACT_TOKEN` in your environment or `.env` file, or
+- Use `make build` which auto-fetches the token
