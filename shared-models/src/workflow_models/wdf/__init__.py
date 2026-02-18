@@ -13,8 +13,9 @@ Usage::
 Reference: RFC Section 4.1-4.3, Jira RAG-945.
 """
 
-from workflow_models.wdf.edges import EdgeDefinition
+from workflow_models.wdf.edges import VALID_EDGE_TYPES, EdgeDefinition
 from workflow_models.wdf.nodes import (
+    VALID_EXECUTION_MODES,
     VALID_NODE_TYPES,
     AgentConfig,
     DocumentExtractionConfig,
@@ -51,6 +52,8 @@ __all__ = [
     # Supporting types
     'ExtractionField',
     'VALID_NODE_TYPES',
+    'VALID_EXECUTION_MODES',
+    'VALID_EDGE_TYPES',
     # Variable reference utilities
     'VariableRef',
     'extract_variable_refs',

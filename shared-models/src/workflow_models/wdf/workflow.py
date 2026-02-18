@@ -5,7 +5,11 @@ structural integrity: entry/exit must reference existing nodes, edges
 must reference existing nodes.
 
 Reference: RFC Section 4.1, Jira RAG-945.
+See also: backend/scripts/workflow_complete_tests/payloads/ for the
+canonical JSON ``workflow`` and ``metadata`` object shapes.
 """
+
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -18,11 +22,17 @@ class WorkflowDefinition(BaseModel):
 
     Nodes are keyed by slug (human-readable identifier). Entry and exit
     are slug references. Edges reference node slugs via from/to fields.
+
+    ``version`` defaults to 1 for new workflows and should be bumped on
+    updates (matching backend behaviour). ``state_schema`` is optional
+    and mirrors the backend's workflow.state_schema object.
     """
 
     name: str
     description: str | None = None
+    version: int = 1
     tags: list[str] = Field(default_factory=list)
+    state_schema: dict[str, Any] | None = None
     nodes: dict[str, NodeDefinition]
     edges: list[EdgeDefinition]
     entry: str
