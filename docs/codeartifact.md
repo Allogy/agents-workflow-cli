@@ -106,23 +106,6 @@ Each target runs `uv build` then `uv publish` with `UV_PUBLISH_URL`,
 `UV_PUBLISH_USERNAME=aws`, and `UV_PUBLISH_PASSWORD` set automatically via
 `aws codeartifact get-authorization-token`.
 
-## CI/CD Publishing
-
-Bitbucket Pipelines publishes on version tags (defined in
-`bitbucket-pipelines.yml`):
-
-| Tag pattern      | Package published          |
-|------------------|----------------------------|
-| `cli-vX.Y.Z`    | `agents-workflow-cli`      |
-| `models-vX.Y.Z` | `agents-workflow-models`   |
-
-The pipeline:
-
-1. Installs `uv` and the AWS CLI
-2. Validates semver + tag/version alignment via `scripts/release/validate_release.py`
-3. Fetches CodeArtifact credentials
-4. Runs `uv build && uv publish`
-
 ### Required Pipeline Variables
 
 Set these in Bitbucket repository settings:

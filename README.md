@@ -79,7 +79,6 @@ uv run pre-commit install
 ```
 workflow-cli/
   pyproject.toml              # Package configuration (uv-managed)
-  bitbucket-pipelines.yml     # CI/CD — publish to CodeArtifact on version tags
   src/
     cli/
       __init__.py             # Package init with version
