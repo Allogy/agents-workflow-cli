@@ -10,8 +10,6 @@ The extractor should find all references in config strings, including
 nested structures and multi-line templates.
 """
 
-import pytest
-
 from workflow_models.wdf.variable_ref import VariableRef, extract_variable_refs
 
 
