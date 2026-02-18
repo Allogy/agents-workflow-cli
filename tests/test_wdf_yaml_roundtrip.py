@@ -28,14 +28,17 @@ tags: [qa]
 nodes:
   question:
     type: plain_txt_input
+    execution_mode: INPUT
     label: Ask Question
     config:
       placeholder: "What would you like to know?"
   answer:
     type: agent
+    execution_mode: MESSAGES
     label: Answer Agent
     config:
-      agentId: qa-agent
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      system_prompt: You are a helpful Q&A assistant.
 edges:
   - from: question
     to: answer
@@ -59,6 +62,7 @@ name: Document Processing Pipeline
 nodes:
   upload:
     type: file_upload
+    execution_mode: INPUT
     label: Upload Document
     config:
       acceptedFormats: [pdf, png, jpg]
@@ -66,6 +70,7 @@ nodes:
       textExtraction: automatic
   extract:
     type: document_extraction
+    execution_mode: FLOW
     label: Extract Fields
     config:
       extractionMethod: llm
@@ -79,6 +84,7 @@ nodes:
       prompt: "Extract vendor and total from invoice."
   classify:
     type: llm_call
+    execution_mode: MESSAGES
     label: Classify Document
     config:
       model: anthropic.claude-sonnet-4-5-v2
@@ -88,9 +94,10 @@ nodes:
         Classify: {{extract.output.extractedData}}
   review:
     type: human_review
+    execution_mode: FLOW
     label: Manager Approval
     config:
-      instructions: "Review the extracted data."
+      review_prompt: "Review the extracted data."
       timeoutMinutes: 1440
 edges:
   - from: upload
@@ -119,8 +126,16 @@ class TestDumpWorkflowYaml:
             description='A test',
             tags=['test'],
             nodes={
-                'start': {'type': 'plain_txt_input', 'config': {}},
-                'end': {'type': 'agent', 'config': {'agentId': 'test'}},
+                'start': {
+                    'type': 'plain_txt_input',
+                    'execution_mode': 'INPUT',
+                    'config': {},
+                },
+                'end': {
+                    'type': 'agent',
+                    'execution_mode': 'MESSAGES',
+                    'config': {'model': 'test', 'system_prompt': 'test'},
+                },
             },
             edges=[{'from': 'start', 'to': 'end'}],
             entry='start',
@@ -139,8 +154,16 @@ class TestDumpWorkflowYaml:
         wf = WorkflowDefinition(
             name='Test',
             nodes={
-                'a': {'type': 'plain_txt_input', 'config': {}},
-                'b': {'type': 'agent', 'config': {'agentId': 'test'}},
+                'a': {
+                    'type': 'plain_txt_input',
+                    'execution_mode': 'INPUT',
+                    'config': {},
+                },
+                'b': {
+                    'type': 'agent',
+                    'execution_mode': 'MESSAGES',
+                    'config': {'model': 'test', 'system_prompt': 'test'},
+                },
             },
             edges=[{'from': 'a', 'to': 'b'}],
             entry='a',
@@ -155,7 +178,7 @@ class TestDumpWorkflowYaml:
         """None/null values should not appear in YAML output."""
         wf = WorkflowDefinition(
             name='Test',
-            nodes={'n': {'type': 'plain_txt_input', 'config': {}}},
+            nodes={'n': {'type': 'plain_txt_input', 'execution_mode': 'INPUT', 'config': {}}},
             edges=[],
             entry='n',
             exit='n',
@@ -174,12 +197,14 @@ class TestYamlRoundTrip:
         original_yaml = """\
 name: Invoice Processing
 description: Extract data from uploaded invoices
+version: 1
 tags:
   - finance
   - document-processing
 nodes:
   upload:
     type: file_upload
+    execution_mode: INPUT
     label: Upload Invoice
     config:
       acceptedFormats:
@@ -189,6 +214,7 @@ nodes:
       textExtraction: automatic
   extract:
     type: document_extraction
+    execution_mode: FLOW
     label: Extract Fields
     config:
       fields:
@@ -200,9 +226,10 @@ nodes:
           required: true
   review:
     type: human_review
+    execution_mode: FLOW
     label: Approve
     config:
-      instructions: Review and approve.
+      review_prompt: Review and approve.
       timeoutMinutes: 60
 edges:
   - from: upload
@@ -222,6 +249,7 @@ exit: review
         # Semantic comparison
         assert wf2.name == wf.name
         assert wf2.description == wf.description
+        assert wf2.version == wf.version
         assert wf2.tags == wf.tags
         assert wf2.entry == wf.entry
         assert wf2.exit == wf.exit
@@ -231,6 +259,7 @@ exit: review
         # Deep node comparison
         for slug in wf.nodes:
             assert wf2.nodes[slug].type == wf.nodes[slug].type
+            assert wf2.nodes[slug].execution_mode == wf.nodes[slug].execution_mode
             assert wf2.nodes[slug].label == wf.nodes[slug].label
             assert wf2.nodes[slug].config == wf.nodes[slug].config
 
@@ -245,21 +274,28 @@ name: Conditional Workflow
 nodes:
   input:
     type: plain_txt_input
+    execution_mode: INPUT
     config: {}
   yes_path:
     type: agent
+    execution_mode: MESSAGES
     config:
-      agentId: yes-agent
+      model: test
+      system_prompt: Handle yes
   no_path:
     type: agent
+    execution_mode: MESSAGES
     config:
-      agentId: no-agent
+      model: test
+      system_prompt: Handle no
 edges:
   - from: input
     to: yes_path
+    type: CONDITIONAL
     condition: "output == 'yes'"
   - from: input
     to: no_path
+    type: CONDITIONAL
     condition: "output == 'no'"
 entry: input
 exit: yes_path
@@ -279,9 +315,11 @@ name: Var Ref Workflow
 nodes:
   input:
     type: plain_txt_input
+    execution_mode: INPUT
     config: {}
   llm:
     type: llm_call
+    execution_mode: MESSAGES
     config:
       model: test-model
       template: "Process: {{input.output.text}}"

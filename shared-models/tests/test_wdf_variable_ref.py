@@ -126,9 +126,14 @@ Use context from {{context.output.hints}} if available."""
         wf = WorkflowDefinition(
             name='Test',
             nodes={
-                'input': {'type': 'plain_txt_input', 'config': {}},
+                'input': {
+                    'type': 'plain_txt_input',
+                    'execution_mode': 'INPUT',
+                    'config': {},
+                },
                 'classify': {
                     'type': 'llm_call',
+                    'execution_mode': 'MESSAGES',
                     'config': {
                         'model': 'test',
                         'template': 'Classify: {{input.output.text}}',

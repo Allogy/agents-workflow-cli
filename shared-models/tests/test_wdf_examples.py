@@ -38,15 +38,30 @@ class TestExampleFiles:
         assert wf.entry in wf.nodes
         assert wf.exit in wf.nodes
 
-    def test_invoice_processing_has_4_nodes(self):
-        """Specific check for the invoice processing example."""
+    def test_example_nodes_have_execution_mode(self, example_path: Path):
+        """Every node must have an execution_mode field."""
+        data = yaml.safe_load(example_path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        for slug, node in wf.nodes.items():
+            assert node.execution_mode in (
+                'INPUT',
+                'OUTPUT',
+                'MESSAGES',
+                'FLOW',
+            ), f'Node {slug!r} has invalid execution_mode: {node.execution_mode!r}'
+
+
+class TestInvoiceProcessingExample:
+    def test_has_4_nodes(self):
         path = EXAMPLES_DIR / 'invoice-processing.workflow.yaml'
         data = yaml.safe_load(path.read_text())
         wf = WorkflowDefinition.model_validate(data)
         assert len(wf.nodes) == 4
         assert set(wf.nodes.keys()) == {'upload', 'extract', 'classify', 'review'}
 
-    def test_all_node_types_has_10_nodes(self):
+
+class TestAllNodeTypesExample:
+    def test_has_10_nodes(self):
         """The all-node-types example must exercise all 10 node types."""
         path = EXAMPLES_DIR / 'all-node-types.workflow.yaml'
         data = yaml.safe_load(path.read_text())
@@ -66,3 +81,101 @@ class TestExampleFiles:
             'human_review',
         }
         assert node_types == expected_types
+
+
+class TestLinearPipelineExample:
+    """Tests for the backend-aligned linear pipeline example."""
+
+    def test_has_3_nodes(self):
+        path = EXAMPLES_DIR / 'linear-pipeline.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        assert len(wf.nodes) == 3
+        assert set(wf.nodes.keys()) == {'user_input', 'summarizer', 'output'}
+
+    def test_node_types_match_backend(self):
+        path = EXAMPLES_DIR / 'linear-pipeline.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        assert wf.nodes['user_input'].type == 'plain_txt_input'
+        assert wf.nodes['user_input'].execution_mode == 'INPUT'
+        assert wf.nodes['summarizer'].type == 'llm_call'
+        assert wf.nodes['summarizer'].execution_mode == 'MESSAGES'
+        assert wf.nodes['output'].type == 'structured_output'
+        assert wf.nodes['output'].execution_mode == 'OUTPUT'
+
+    def test_has_variable_reference(self):
+        """The LLM node should reference the input node's output."""
+        path = EXAMPLES_DIR / 'linear-pipeline.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        from workflow_models.wdf.variable_ref import extract_variable_refs
+
+        refs = extract_variable_refs(wf.nodes['summarizer'].config)
+        assert len(refs) == 1
+        assert refs[0].slug == 'user_input'
+
+
+class TestRagWorkflowExample:
+    """Tests for the backend-aligned RAG workflow example."""
+
+    def test_has_4_nodes(self):
+        path = EXAMPLES_DIR / 'rag-workflow.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        assert len(wf.nodes) == 4
+        assert set(wf.nodes.keys()) == {'form_input', 'file_upload', 'summarizer', 'rag_agent'}
+
+
+class TestAgentReviewExample:
+    """Tests for the backend-aligned agent review example."""
+
+    def test_has_4_nodes(self):
+        path = EXAMPLES_DIR / 'agent-review.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        assert len(wf.nodes) == 4
+        assert set(wf.nodes.keys()) == {'user_input', 'agent', 'review', 'output'}
+
+    def test_agent_config_aligned(self):
+        """Agent config should have model and system_prompt."""
+        path = EXAMPLES_DIR / 'agent-review.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        agent = wf.nodes['agent']
+        assert agent.parsed_config is not None
+        from workflow_models.wdf.nodes import AgentConfig
+
+        assert isinstance(agent.parsed_config, AgentConfig)
+        assert agent.parsed_config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert 'helpful assistant' in agent.parsed_config.system_prompt
+
+
+class TestRetrievalPipelineExample:
+    """Tests for the backend-aligned retrieval pipeline example."""
+
+    def test_has_5_nodes(self):
+        path = EXAMPLES_DIR / 'retrieval-pipeline.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        assert len(wf.nodes) == 5
+        assert set(wf.nodes.keys()) == {
+            'search_form',
+            'vector_search',
+            'content_extractor',
+            'summarizer',
+            'search_results',
+        }
+
+    def test_retrieve_config_aligned(self):
+        """Retrieve config should have the new fields."""
+        path = EXAMPLES_DIR / 'retrieval-pipeline.workflow.yaml'
+        data = yaml.safe_load(path.read_text())
+        wf = WorkflowDefinition.model_validate(data)
+        retrieve = wf.nodes['vector_search']
+        assert retrieve.parsed_config is not None
+        from workflow_models.wdf.nodes import RetrieveConfig
+
+        assert isinstance(retrieve.parsed_config, RetrieveConfig)
+        assert retrieve.parsed_config.enableReranking is False
+        assert retrieve.parsed_config.includeMetadata is True

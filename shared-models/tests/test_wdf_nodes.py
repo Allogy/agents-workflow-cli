@@ -135,24 +135,55 @@ class TestFileUploadConfig:
 
 
 class TestAgentConfig:
-    """AGENT: agentId (required), agentConfig (optional overrides)."""
+    """AGENT: model, system_prompt (required); temperature, maxTokens, tools, agentId (optional)."""
 
-    def test_valid_with_agent_id(self):
-        config = AgentConfig(agentId='research-agent')
-        assert config.agentId == 'research-agent'
-        assert config.agentConfig is None
-
-    def test_with_agent_config_overrides(self):
+    def test_valid_minimal(self):
         config = AgentConfig(
-            agentId='research-agent',
-            agentConfig={'temperature': 0.7, 'maxTokens': 4096},
+            model='us.anthropic.claude-sonnet-4-20250514-v1:0',
+            system_prompt='You are a helpful assistant.',
         )
-        assert config.agentConfig == {'temperature': 0.7, 'maxTokens': 4096}
+        assert config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert config.system_prompt == 'You are a helpful assistant.'
+        assert config.temperature is None
+        assert config.maxTokens is None
+        assert config.tools is None
+        assert config.agentId is None
 
-    def test_missing_agent_id_raises(self):
-        with pytest.raises(ValidationError) as exc_info:
-            AgentConfig()  # type: ignore[call-arg]
-        assert 'agentId' in str(exc_info.value) or 'agent_id' in str(exc_info.value)
+    def test_valid_full_config(self):
+        config = AgentConfig(
+            model='us.anthropic.claude-sonnet-4-20250514-v1:0',
+            system_prompt='You are a helpful assistant.',
+            temperature=0.7,
+            maxTokens=2048,
+            tools=[],
+            agentId='general-agent',
+        )
+        assert config.temperature == 0.7
+        assert config.maxTokens == 2048
+        assert config.tools == []
+        assert config.agentId == 'general-agent'
+
+    def test_missing_model_raises(self):
+        with pytest.raises(ValidationError):
+            AgentConfig(system_prompt='test')  # type: ignore[call-arg]
+
+    def test_missing_system_prompt_raises(self):
+        with pytest.raises(ValidationError):
+            AgentConfig(model='test')  # type: ignore[call-arg]
+
+    def test_temperature_range(self):
+        """Temperature should be between 0 and 2."""
+        config = AgentConfig(model='test', system_prompt='test', temperature=0.0)
+        assert config.temperature == 0.0
+
+        config = AgentConfig(model='test', system_prompt='test', temperature=2.0)
+        assert config.temperature == 2.0
+
+        with pytest.raises(ValidationError):
+            AgentConfig(model='test', system_prompt='test', temperature=-0.1)
+
+        with pytest.raises(ValidationError):
+            AgentConfig(model='test', system_prompt='test', temperature=2.1)
 
 
 # ============================================
@@ -161,7 +192,7 @@ class TestAgentConfig:
 
 
 class TestRagAgentConfig:
-    """RAG_AGENT: agentId, knowledgeBaseIds (required)."""
+    """RAG_AGENT: agentId, knowledgeBaseIds (required); primaryInput (optional)."""
 
     def test_valid_config(self):
         config = RagAgentConfig(
@@ -170,15 +201,15 @@ class TestRagAgentConfig:
         )
         assert config.agentId == 'kb-agent'
         assert config.knowledgeBaseIds == ['kb-1', 'kb-2']
-        assert config.knowledgeBasesOverride is None
+        assert config.primaryInput is None
 
-    def test_with_override_flag(self):
+    def test_with_primary_input(self):
         config = RagAgentConfig(
             agentId='kb-agent',
             knowledgeBaseIds=['kb-1'],
-            knowledgeBasesOverride=False,
+            primaryInput='{{llmPrompt_1.output.text}}',
         )
-        assert config.knowledgeBasesOverride is False
+        assert config.primaryInput == '{{llmPrompt_1.output.text}}'
 
     def test_missing_agent_id_raises(self):
         with pytest.raises(ValidationError):
@@ -199,7 +230,7 @@ class TestRagAgentConfig:
 
 
 class TestLlmCallConfig:
-    """LLM_CALL: model (required), template (required); temperature, maxTokens, topP (optional)."""
+    """LLM_CALL: model, template (required); system_prompt, temperature, maxTokens, topP (optional)."""
 
     def test_valid_minimal(self):
         config = LlmCallConfig(
@@ -208,6 +239,7 @@ class TestLlmCallConfig:
         )
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
         assert config.template == 'Analyze the following: {{input.output.data}}'
+        assert config.system_prompt is None
         assert config.temperature is None
         assert config.maxTokens is None
         assert config.topP is None
@@ -219,10 +251,12 @@ class TestLlmCallConfig:
             maxTokens=2048,
             topP=0.9,
             template='Classify: {{extract.output.extractedData}}',
+            system_prompt='You are a helpful assistant.',
         )
         assert config.temperature == 0.3
         assert config.maxTokens == 2048
         assert config.topP == 0.9
+        assert config.system_prompt == 'You are a helpful assistant.'
 
     def test_missing_model_raises(self):
         with pytest.raises(ValidationError):
@@ -265,18 +299,18 @@ class TestLlmCallConfig:
 
 
 class TestStructuredOutputConfig:
-    """STRUCTURED_OUTPUT: model, outputSchema (optional)."""
+    """STRUCTURED_OUTPUT: schema (JSON Schema, optional), model (optional)."""
 
     def test_empty_config_valid(self):
         """All fields are optional."""
         config = StructuredOutputConfig()
+        assert config.schema_ is None
         assert config.model is None
-        assert config.outputSchema is None
 
-    def test_with_output_schema(self):
+    def test_with_schema(self):
         config = StructuredOutputConfig(
             model='anthropic.claude-sonnet-4-5-v2',
-            outputSchema={
+            schema={
                 'type': 'object',
                 'properties': {
                     'summary': {'type': 'string'},
@@ -285,7 +319,7 @@ class TestStructuredOutputConfig:
             },
         )
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
-        assert config.outputSchema['type'] == 'object'
+        assert config.schema_['type'] == 'object'
 
 
 # ============================================
@@ -294,22 +328,28 @@ class TestStructuredOutputConfig:
 
 
 class TestRetrieveConfig:
-    """RETRIEVE: knowledgeBaseId (required), topK, scoreThreshold (optional)."""
+    """RETRIEVE: knowledgeBaseId (required), topK, scoreThreshold, enableReranking, includeMetadata (optional)."""
 
     def test_valid_minimal(self):
         config = RetrieveConfig(knowledgeBaseId='my-kb')
         assert config.knowledgeBaseId == 'my-kb'
         assert config.topK is None
         assert config.scoreThreshold is None
+        assert config.enableReranking is None
+        assert config.includeMetadata is None
 
     def test_valid_full_config(self):
         config = RetrieveConfig(
             knowledgeBaseId='my-kb',
             topK=5,
             scoreThreshold=0.7,
+            enableReranking=False,
+            includeMetadata=True,
         )
         assert config.topK == 5
         assert config.scoreThreshold == 0.7
+        assert config.enableReranking is False
+        assert config.includeMetadata is True
 
     def test_missing_knowledge_base_id_raises(self):
         with pytest.raises(ValidationError):
@@ -334,9 +374,18 @@ class TestRetrieveConfig:
 
 
 class TestDocumentExtractionConfig:
-    """DOCUMENT_EXTRACTION: fields (required); extractionMethod, prompt (optional)."""
+    """DOCUMENT_EXTRACTION: fields (default empty); extractionMethod, prompt, extractTables, extractImages (optional)."""
 
-    def test_valid_with_fields(self):
+    def test_empty_config_valid(self):
+        """Fields default to empty list — empty config is valid."""
+        config = DocumentExtractionConfig()
+        assert config.fields == []
+        assert config.extractionMethod is None
+        assert config.prompt is None
+        assert config.extractTables is None
+        assert config.extractImages is None
+
+    def test_with_fields(self):
         config = DocumentExtractionConfig(
             fields=[
                 ExtractionField(name='vendor_name', type='string', required=True),
@@ -346,8 +395,6 @@ class TestDocumentExtractionConfig:
         assert len(config.fields) == 2
         assert config.fields[0].name == 'vendor_name'
         assert config.fields[0].required is True
-        assert config.extractionMethod is None
-        assert config.prompt is None
 
     def test_valid_full_config(self):
         config = DocumentExtractionConfig(
@@ -357,18 +404,13 @@ class TestDocumentExtractionConfig:
                 ExtractionField(name='date', type='string', required=False),
             ],
             prompt='Extract the title and date from this document.',
+            extractTables=True,
+            extractImages=False,
         )
         assert config.extractionMethod == 'llm'
         assert config.prompt == 'Extract the title and date from this document.'
-
-    def test_missing_fields_raises(self):
-        with pytest.raises(ValidationError):
-            DocumentExtractionConfig()  # type: ignore[call-arg]
-
-    def test_empty_fields_raises(self):
-        """Fields list must not be empty."""
-        with pytest.raises(ValidationError):
-            DocumentExtractionConfig(fields=[])
+        assert config.extractTables is True
+        assert config.extractImages is False
 
     def test_extraction_field_requires_name_and_type(self):
         with pytest.raises(ValidationError):
@@ -388,20 +430,29 @@ class TestDocumentExtractionConfig:
 
 
 class TestHumanReviewConfig:
-    """HUMAN_REVIEW: instructions, timeoutMinutes (both optional)."""
+    """HUMAN_REVIEW: review_prompt, timeoutMinutes, allowApprove, allowReject, allowEdit (all optional)."""
 
     def test_empty_config_valid(self):
         config = HumanReviewConfig()
-        assert config.instructions is None
+        assert config.review_prompt is None
         assert config.timeoutMinutes is None
+        assert config.allowApprove is None
+        assert config.allowReject is None
+        assert config.allowEdit is None
 
     def test_with_all_fields(self):
         config = HumanReviewConfig(
-            instructions='Review and approve or reject.',
+            review_prompt='Please review and approve to continue.',
             timeoutMinutes=1440,
+            allowApprove=True,
+            allowReject=True,
+            allowEdit=False,
         )
-        assert config.instructions == 'Review and approve or reject.'
+        assert config.review_prompt == 'Please review and approve to continue.'
         assert config.timeoutMinutes == 1440
+        assert config.allowApprove is True
+        assert config.allowReject is True
+        assert config.allowEdit is False
 
     def test_timeout_must_be_positive(self):
         with pytest.raises(ValidationError):
@@ -417,15 +468,17 @@ class TestHumanReviewConfig:
 
 
 class TestNodeDefinition:
-    """NodeDefinition wraps type + label + config for any node type."""
+    """NodeDefinition wraps type + execution_mode + label + config for any node type."""
 
     def test_plain_txt_input_node(self):
         node = NodeDefinition(
             type='plain_txt_input',
+            execution_mode='INPUT',
             label='Enter Question',
             config={'placeholder': 'Type your question here...'},
         )
         assert node.type == 'plain_txt_input'
+        assert node.execution_mode == 'INPUT'
         assert node.label == 'Enter Question'
         assert isinstance(node.parsed_config, PlainTxtInputConfig)
         assert node.parsed_config.placeholder == 'Type your question here...'
@@ -433,16 +486,22 @@ class TestNodeDefinition:
     def test_agent_node(self):
         node = NodeDefinition(
             type='agent',
+            execution_mode='MESSAGES',
             label='Research Agent',
-            config={'agentId': 'research-agent'},
+            config={
+                'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+                'system_prompt': 'You are a helpful assistant.',
+            },
         )
         assert node.type == 'agent'
+        assert node.execution_mode == 'MESSAGES'
         assert isinstance(node.parsed_config, AgentConfig)
-        assert node.parsed_config.agentId == 'research-agent'
+        assert node.parsed_config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
 
     def test_llm_call_node(self):
         node = NodeDefinition(
             type='llm_call',
+            execution_mode='MESSAGES',
             label='Classify',
             config={
                 'model': 'anthropic.claude-sonnet-4-5-v2',
@@ -454,6 +513,7 @@ class TestNodeDefinition:
     def test_file_upload_node(self):
         node = NodeDefinition(
             type='file_upload',
+            execution_mode='INPUT',
             label='Upload Document',
             config={
                 'acceptedFormats': ['pdf', 'docx'],
@@ -467,15 +527,34 @@ class TestNodeDefinition:
         with pytest.raises(ValidationError):
             NodeDefinition(
                 type='unknown_type',
+                execution_mode='INPUT',
                 label='Bad Node',
                 config={},
             )
+
+    def test_invalid_execution_mode_raises(self):
+        """Invalid execution modes should be rejected."""
+        with pytest.raises(ValidationError):
+            NodeDefinition(
+                type='plain_txt_input',
+                execution_mode='INVALID',
+                config={},
+            )
+
+    def test_missing_execution_mode_raises(self):
+        """execution_mode is required."""
+        with pytest.raises(ValidationError):
+            NodeDefinition(
+                type='plain_txt_input',
+                config={},
+            )  # type: ignore[call-arg]
 
     def test_invalid_config_for_type_raises(self):
         """Config must match the declared node type's schema."""
         with pytest.raises(ValidationError):
             NodeDefinition(
                 type='llm_call',
+                execution_mode='MESSAGES',
                 label='Bad LLM',
                 config={'placeholder': 'wrong config for llm_call'},
             )
@@ -483,6 +562,7 @@ class TestNodeDefinition:
     def test_label_is_optional(self):
         node = NodeDefinition(
             type='human_review',
+            execution_mode='FLOW',
             config={},
         )
         assert node.label is None
@@ -490,17 +570,36 @@ class TestNodeDefinition:
     def test_all_10_node_types_recognized(self):
         """Verify all 10 node types from the ticket can be created."""
         valid_types = [
-            ('plain_txt_input', {}),
-            ('structured_input', {'schema': {'type': 'object'}}),
-            ('file_upload', {'acceptedFormats': ['pdf'], 'maxFileSize': 1024}),
-            ('agent', {'agentId': 'test-agent'}),
-            ('rag_agent', {'agentId': 'test-agent', 'knowledgeBaseIds': ['kb-1']}),
-            ('llm_call', {'model': 'test', 'template': 'test'}),
-            ('structured_output', {}),
-            ('retrieve', {'knowledgeBaseId': 'kb-1'}),
-            ('document_extraction', {'fields': [{'name': 'f1', 'type': 'string'}]}),
-            ('human_review', {}),
+            ('plain_txt_input', 'INPUT', {}),
+            ('structured_input', 'INPUT', {'schema': {'type': 'object'}}),
+            ('file_upload', 'INPUT', {'acceptedFormats': ['pdf'], 'maxFileSize': 1024}),
+            (
+                'agent',
+                'MESSAGES',
+                {'model': 'test', 'system_prompt': 'test'},
+            ),
+            (
+                'rag_agent',
+                'MESSAGES',
+                {'agentId': 'test-agent', 'knowledgeBaseIds': ['kb-1']},
+            ),
+            ('llm_call', 'MESSAGES', {'model': 'test', 'template': 'test'}),
+            ('structured_output', 'OUTPUT', {}),
+            ('retrieve', 'FLOW', {'knowledgeBaseId': 'kb-1'}),
+            ('document_extraction', 'FLOW', {}),
+            ('human_review', 'FLOW', {}),
         ]
-        for node_type, config in valid_types:
-            node = NodeDefinition(type=node_type, config=config)
+        for node_type, exec_mode, config in valid_types:
+            node = NodeDefinition(type=node_type, execution_mode=exec_mode, config=config)
             assert node.type == node_type, f'Failed to create node of type {node_type}'
+            assert node.execution_mode == exec_mode
+
+    def test_all_valid_execution_modes(self):
+        """Verify all 4 execution modes are accepted."""
+        for mode in ('INPUT', 'OUTPUT', 'MESSAGES', 'FLOW'):
+            node = NodeDefinition(
+                type='plain_txt_input',
+                execution_mode=mode,
+                config={},
+            )
+            assert node.execution_mode == mode
