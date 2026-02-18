@@ -11,6 +11,7 @@ from rich.console import Console
 
 from cli import __version__
 from cli.commands.init import init_command
+from cli.commands.push import push_workflow
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
 
@@ -177,3 +178,36 @@ def init(
         workflow init --template simple-form -o my-workflow.workflow.yaml
     """
     init_command(template=template, output=output, force=force, list_mode=list_templates)
+
+
+@app.command()
+def push(
+    file_path: Annotated[
+        Path,
+        typer.Argument(
+            help='Path to .workflow.yaml file to push.',
+            exists=True,
+        ),
+    ],
+) -> None:
+    """Push a workflow to the platform.
+
+    Creates or updates a workflow on the platform using the atomic save endpoint.
+    Automatically resolves dependencies (agents, knowledge bases) and generates
+    node layout positions.
+
+    On first push, creates a .workflow.lock file to track server-side UUIDs.
+    Subsequent pushes use the lockfile to update the existing workflow in place.
+
+    Exit codes: 0 = success, 1 = failure
+
+    Examples:
+        workflow push my-workflow.workflow.yaml
+        workflow push --host https://api.example.com --api-key xxx workflow.yaml
+    """
+    config = get_config()
+    try:
+        push_workflow(file_path, config)
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(1) from e
