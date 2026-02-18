@@ -85,9 +85,27 @@ workflow-cli/
       __init__.py             # Package init with version
       __main__.py             # Enables `python -m cli`
       main.py                 # Typer app entry point
+      wdf_yaml.py             # WDF YAML load/dump helpers (PyYAML wrapper)
   shared-models/              # agents-workflow-models (published separately)
     pyproject.toml
     src/workflow_models/
+      __init__.py             # Re-exports enums, schemas, and WDF models
+      enums.py                # NodeConfigType, EdgeType, ExecutionMode, etc.
+      schemas/                # API-oriented schemas (Create/Update/Public)
+      wdf/                    # WDF models — YAML-oriented workflow definitions
+        __init__.py           #   Re-exports all WDF types
+        nodes.py              #   NodeDefinition + 10 node config schemas
+        edges.py              #   EdgeDefinition (source/target slug-based)
+        workflow.py           #   WorkflowDefinition (root model with validation)
+        variable_ref.py       #   VariableRef + extract_variable_refs()
+    examples/                 # Example .workflow.yaml files
+      invoice-processing.workflow.yaml
+      all-node-types.workflow.yaml
+    tests/
+      test_wdf_nodes.py      # Node config schema tests
+      test_wdf_workflow.py    # WorkflowDefinition / EdgeDefinition tests
+      test_wdf_variable_ref.py # Variable reference extraction tests
+      test_wdf_examples.py   # Validates example YAML files parse correctly
   scripts/
     release/
       validate_release.py     # Semver + tag/version validation
@@ -95,6 +113,7 @@ workflow-cli/
     conftest.py               # Shared test fixtures
     test_release_validation.py # Release validation coverage
     test_shared_models_integration.py
+    test_wdf_yaml_roundtrip.py # WDF YAML round-trip serialization tests
   docs/
     codeartifact.md           # CodeArtifact setup, publishing, CI/CD
   .pre-commit-config.yaml     # Pre-commit hook configuration
@@ -113,4 +132,48 @@ uv run workflow --version
 # Run a command
 uv run workflow hello
 uv run workflow hello "Agents Platform"
+```
+
+## Workflow Definition Format (WDF)
+
+The CLI supports a **YAML-based Workflow Definition Format** for authoring
+workflows as human-readable files. WDF files use slug-keyed nodes, variable
+references (`{{slug.output.field}}`), and typed edge definitions — no UUIDs
+required.
+
+The **Pydantic models** (validation, type checking) live in the shared-models
+package (`workflow_models.wdf`). The **YAML layer** (load/dump via PyYAML) lives
+in the CLI (`cli.wdf_yaml`), keeping shared-models free of PyYAML runtime
+dependencies.
+
+### YAML Round-Trip
+
+```python
+from cli.wdf_yaml import load_workflow, dump_workflow
+
+# Load a .workflow.yaml file into a validated WorkflowDefinition
+workflow = load_workflow('path/to/my.workflow.yaml')
+
+# Dump back to YAML string
+yaml_str = dump_workflow(workflow)
+```
+
+### Example Workflow Files
+
+See `shared-models/examples/` for reference YAML files:
+
+- `invoice-processing.workflow.yaml` — realistic 4-node invoice processing pipeline
+- `all-node-types.workflow.yaml` — reference file demonstrating all 10 node types
+
+### Testing WDF
+
+```bash
+# Shared-models tests (Pydantic models, validation, variable refs, example files)
+uv run pytest shared-models/tests/test_wdf_*.py -v
+
+# CLI tests (YAML round-trip serialization)
+uv run pytest tests/test_wdf_yaml_roundtrip.py -v
+
+# All tests
+uv run pytest
 ```
