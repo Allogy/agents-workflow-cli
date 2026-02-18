@@ -29,7 +29,6 @@ from workflow_models.wdf.nodes import (
     StructuredOutputConfig,
 )
 
-
 # ============================================
 # PLAIN_TXT_INPUT Config
 # ============================================
@@ -114,9 +113,7 @@ class TestFileUploadConfig:
     def test_missing_accepted_formats_raises(self):
         with pytest.raises(ValidationError) as exc_info:
             FileUploadConfig(maxFileSize=1024)  # type: ignore[call-arg]
-        assert 'acceptedFormats' in str(exc_info.value) or 'accepted_formats' in str(
-            exc_info.value
-        )
+        assert 'acceptedFormats' in str(exc_info.value) or 'accepted_formats' in str(exc_info.value)
 
     def test_missing_max_file_size_raises(self):
         with pytest.raises(ValidationError) as exc_info:
@@ -237,14 +234,10 @@ class TestLlmCallConfig:
 
     def test_temperature_range(self):
         """Temperature should be between 0 and 2."""
-        config = LlmCallConfig(
-            model='test', template='test', temperature=0.0
-        )
+        config = LlmCallConfig(model='test', template='test', temperature=0.0)
         assert config.temperature == 0.0
 
-        config = LlmCallConfig(
-            model='test', template='test', temperature=2.0
-        )
+        config = LlmCallConfig(model='test', template='test', temperature=2.0)
         assert config.temperature == 2.0
 
         with pytest.raises(ValidationError):
