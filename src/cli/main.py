@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from cli import __version__
+from cli.commands.init import init_command
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
 
@@ -130,3 +131,49 @@ def validate(
     Exit codes: 0 = pass (warnings OK), 1 = failure
     """
     validate_command(file_path)
+
+
+@app.command()
+def init(
+    template: Annotated[
+        str | None,
+        typer.Option(
+            '--template',
+            '-t',
+            help='Template name to scaffold from (e.g. rag-qa, simple-form).',
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output file path. Defaults to {template-name}.workflow.yaml.',
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            '--force',
+            help='Overwrite existing file if it exists.',
+        ),
+    ] = False,
+    list_templates: Annotated[
+        bool,
+        typer.Option(
+            '--list',
+            help='List all available templates and exit.',
+        ),
+    ] = False,
+) -> None:
+    """Scaffold a new workflow from a built-in template.
+
+    Create a .workflow.yaml file from one of the built-in templates.
+    Use --list to see available templates, or --template to pick one.
+
+    Examples:
+        workflow init --list
+        workflow init --template rag-qa
+        workflow init --template simple-form -o my-workflow.workflow.yaml
+    """
+    init_command(template=template, output=output, force=force, list_mode=list_templates)
