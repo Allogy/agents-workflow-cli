@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from workflow_models.wdf.edges import EdgeDefinition
 from workflow_models.wdf.workflow import WorkflowDefinition
 
-
 # ============================================
 # EDGE DEFINITION
 # ============================================
