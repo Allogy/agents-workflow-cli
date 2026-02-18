@@ -85,6 +85,9 @@ workflow-cli/
       __init__.py             # Package init with version
       __main__.py             # Enables `python -m cli`
       main.py                 # Typer app entry point
+      client.py               # WorkflowClient — httpx-based API client
+      config.py               # CLIConfig — host/api_key/org_id resolution
+      exceptions.py           # Typed API exception hierarchy
       wdf_yaml.py             # WDF YAML load/dump helpers (PyYAML wrapper)
   shared-models/              # agents-workflow-models (published separately)
     pyproject.toml
@@ -115,6 +118,8 @@ workflow-cli/
       validate_release.py     # Semver + tag/version validation
   tests/
     conftest.py               # Shared test fixtures
+    test_client.py            # WorkflowClient unit tests (pytest-httpx)
+    test_exceptions.py        # API exception hierarchy tests
     test_release_validation.py # Release validation coverage
     test_shared_models_integration.py
     test_wdf_yaml_roundtrip.py # WDF YAML round-trip serialization tests
@@ -136,6 +141,103 @@ uv run workflow --version
 # Run a command
 uv run workflow hello
 uv run workflow hello "Agents Platform"
+```
+
+## API Client
+
+The CLI includes a typed HTTP client (`WorkflowClient`) for communicating with
+the Agents Platform REST API. It uses **httpx** (synchronous mode) with
+`X-API-Key` authentication, and returns validated **Pydantic models** from the
+shared-models package.
+
+### Quick Start
+
+```python
+from cli.client import WorkflowClient
+
+# Direct construction
+with WorkflowClient(
+    host="https://api.example.com",
+    api_key="your-api-key",
+    org_id="your-org-id",
+) as client:
+    workflows = client.list_workflows()
+    workflow = client.get_workflow(workflow_id)
+
+# Or from CLI configuration (validates required fields)
+from cli.config import CLIConfig
+
+config = CLIConfig.load()
+client = WorkflowClient.from_config(config)
+```
+
+### Available Methods
+
+#### V1 Workflow CRUD
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `list_workflows()` | List workflows with pagination | `list[WorkflowPublic]` |
+| `get_workflow(id)` | Get a single workflow | `WorkflowPublic` |
+| `delete_workflow(id)` | Delete a workflow | `None` |
+| `list_nodes(workflow_id)` | List nodes for a workflow | `list[LogicalNodePublic]` |
+| `list_edges(workflow_id)` | List edges for a workflow | `list[LogicalEdgePublic]` |
+| `get_metadata(workflow_id)` | Get workflow metadata | `WorkflowMetadataPublic` |
+
+#### V1 Atomic Save
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `save_complete_workflow(payload)` | Create or update a full workflow atomically | `SaveCompleteWorkflowResponse` |
+
+#### V2 Temporal Execution
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `start_workflow_temporal(id, inputs)` | Start a workflow via Temporal | `TemporalStartResponse` |
+| `get_workflow_status(id, run_id)` | Check execution status | `WorkflowStatusResponse` |
+| `submit_input(id, run_id, node_id, data)` | Submit input to a paused INPUT node | `SubmitInputResponse` |
+| `submit_review(id, run_id, decision)` | Submit a HUMAN_REVIEW decision | `SubmitReviewResponse` |
+
+#### Dependency Resolution
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `find_agent_by_name(name)` | Find agent by name (case-insensitive) | `dict \| None` |
+| `find_knowledge_base_by_name(name)` | Find KB by name (case-insensitive) | `dict \| None` |
+
+### Exception Handling
+
+All API errors are mapped to typed exceptions with status codes and error details:
+
+```python
+from cli.exceptions import (
+    APIError,            # Base class for all API errors
+    AuthenticationError, # 401 — invalid or missing API key
+    AuthorizationError,  # 403 — insufficient permissions
+    NotFoundError,       # 404 — resource not found
+    ValidationError,     # 400/422 — invalid request payload
+    ConflictError,       # 409 — state conflict
+    RateLimitError,      # 429 — rate limit exceeded (has retry_after)
+    ServerError,         # 500/502/503 — server-side failure
+)
+
+try:
+    workflow = client.get_workflow("nonexistent-id")
+except NotFoundError as e:
+    print(f"Status {e.status_code}: {e.detail}")
+except APIError as e:
+    print(f"Unexpected error: {e}")
+```
+
+### Testing
+
+```bash
+# Run API client tests
+uv run pytest tests/test_client.py tests/test_exceptions.py -v
+
+# All tests (includes client + exceptions + WDF + release)
+uv run pytest
 ```
 
 ## Workflow Definition Format (WDF)
