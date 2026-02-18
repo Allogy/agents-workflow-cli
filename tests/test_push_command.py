@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
-from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -16,7 +14,6 @@ from cli.commands.push import (
     resolve_dependencies,
     wdf_to_api_payload,
 )
-
 
 # --- Test Fixtures ---
 
@@ -65,8 +62,12 @@ def simple_workflow() -> WorkflowDefinition:
 
 @pytest.fixture
 def workflow_with_agent() -> WorkflowDefinition:
-    """Workflow with agent reference."""
-    return WorkflowDefinition(
+    """Workflow with agent reference.
+
+    Uses model_construct() to bypass validation for the agent node,
+    allowing us to use agent_name (which is resolved before validation).
+    """
+    return WorkflowDefinition.model_construct(
         name='Agent Workflow',
         description='Workflow using an agent',
         version=1,
@@ -77,9 +78,9 @@ def workflow_with_agent() -> WorkflowDefinition:
                 label='User Input',
                 config={'placeholder': 'Enter text'},
             ),
-            'agent': NodeDefinition(
+            'agent': NodeDefinition.model_construct(
                 type='agent',
-                execution_mode='FLOW',
+                execution_mode='MESSAGES',
                 label='My Agent',
                 config={
                     'agent_name': 'Test Agent',
@@ -104,8 +105,12 @@ def workflow_with_agent() -> WorkflowDefinition:
 
 @pytest.fixture
 def workflow_with_kb() -> WorkflowDefinition:
-    """Workflow with knowledge base reference."""
-    return WorkflowDefinition(
+    """Workflow with knowledge base reference.
+
+    Uses model_construct() to bypass validation for the retrieve node,
+    allowing us to use knowledge_base_name (which is resolved before validation).
+    """
+    return WorkflowDefinition.model_construct(
         name='RAG Workflow',
         description='Workflow using a knowledge base',
         version=1,
@@ -116,14 +121,14 @@ def workflow_with_kb() -> WorkflowDefinition:
                 label='User Input',
                 config={'placeholder': 'Enter question'},
             ),
-            'retrieval': NodeDefinition(
+            'retrieval': NodeDefinition.model_construct(
                 type='retrieve',
                 execution_mode='FLOW',
                 label='KB Retrieval',
                 config={
                     'knowledge_base_name': 'Test KB',
                     'query': '{{input.output.text}}',
-                    'max_results': 5,
+                    'topK': 5,
                 },
             ),
             'output': NodeDefinition(
@@ -236,14 +241,14 @@ def test_generate_node_layout_vertical_spacing(simple_workflow):
 
 def test_generate_node_layout_empty_workflow():
     """Test layout generation for workflow with no nodes."""
-    workflow = WorkflowDefinition.model_validate(
-        {
-            'name': 'Empty',
-            'description': 'Empty workflow',
-            'version': 1,
-            'nodes': {},
-            'edges': [],
-        }
+    workflow = WorkflowDefinition.model_construct(
+        name='Empty',
+        description='Empty workflow',
+        version=1,
+        nodes={},
+        edges=[],
+        entry=None,
+        exit=None,
     )
     layout = generate_node_layout(workflow)
     assert layout == {}
