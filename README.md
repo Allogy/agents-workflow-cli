@@ -137,10 +137,20 @@ uv run workflow --help
 # Show version
 uv run workflow --version
 
-# Run a command
-uv run workflow hello
-uv run workflow hello "Agents Platform"
+# Scaffold a new workflow from a template
+uv run workflow init --list
+uv run workflow init --template rag-qa
+
+# Validate a workflow file
+uv run workflow validate my-workflow.workflow.yaml
 ```
+
+### Commands
+
+| Command | Description | Docs |
+|---------|-------------|------|
+| `init` | Scaffold a new workflow from a template | [`docs/init-command.md`](docs/init-command.md) |
+| `validate` | Validate a workflow definition file offline | [`docs/validate-command.md`](docs/validate-command.md) |
 
 ## API Client
 
