@@ -30,6 +30,12 @@ from workflow_models.wdf.nodes import (
     StructuredInputConfig,
     StructuredOutputConfig,
 )
+from workflow_models.wdf.validation import (
+    ValidationResult,
+    check_cycles,
+    check_reachability,
+    check_variable_references,
+)
 from workflow_models.wdf.variable_ref import VariableRef, extract_variable_refs
 from workflow_models.wdf.workflow import WorkflowDefinition
 
@@ -57,4 +63,9 @@ __all__ = [
     # Variable reference utilities
     'VariableRef',
     'extract_variable_refs',
+    # Validation utilities
+    'ValidationResult',
+    'check_reachability',
+    'check_cycles',
+    'check_variable_references',
 ]
