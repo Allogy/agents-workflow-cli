@@ -1,0 +1,49 @@
+# linear-pipeline.workflow.yaml
+# WDF equivalent of: backend/scripts/workflow_complete_tests/payloads/linear_pipeline.json
+# Pattern: PLAIN_TXT_INPUT -> LLM_CALL -> STRUCTURED_OUTPUT (3-node linear)
+
+name: Linear Pipeline
+description: Simple 3-node linear workflow — text input, LLM call, structured output
+version: 1
+tags:
+  - test
+  - linear
+
+nodes:
+  user_input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Enter Question
+    config:
+      placeholder: Enter your question
+
+  summarizer:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Summarizer
+    config:
+      model: anthropic.claude-3-5-sonnet-20241022-v2:0
+      system_prompt: You are a helpful assistant. Answer the user's question concisely.
+      temperature: 0.7
+      maxTokens: 1024
+      template: "Please answer the question: {{user_input.output.text}}"
+
+  output:
+    type: structured_output
+    execution_mode: OUTPUT
+    label: Structured Output
+    config:
+      schema:
+        type: object
+        properties: {}
+        required: []
+        additionalProperties: false
+
+edges:
+  - from: user_input
+    to: summarizer
+  - from: summarizer
+    to: output
+
+entry: user_input
+exit: output

@@ -1,0 +1,66 @@
+# rag-workflow.workflow.yaml
+# WDF equivalent of: backend/scripts/workflow_complete_tests/payloads/rag_workflow.json
+# Pattern: STRUCTURED_INPUT -> FILE_UPLOAD -> LLM_CALL -> RAG_AGENT (4-node RAG pipeline)
+
+name: RAG Workflow
+description: 4-node RAG pipeline — form input, file upload, LLM summarization, RAG agent
+version: 1
+tags:
+  - test
+  - rag
+
+nodes:
+  form_input:
+    type: structured_input
+    execution_mode: INPUT
+    label: Instructions
+    config:
+      schema:
+        type: object
+        properties:
+          topic:
+            title: Topic
+            type: string
+        required:
+          - topic
+
+  file_upload:
+    type: file_upload
+    execution_mode: INPUT
+    label: Document Upload
+    config:
+      acceptedFormats: [pdf, docx, txt]
+      maxFileSize: 10485760
+      textExtraction: automatic
+      extractTables: true
+
+  summarizer:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Summarizer
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.7
+      maxTokens: 1000
+      template: "Summarize the following document:\n{{file_upload.output.text}}"
+
+  rag_agent:
+    type: rag_agent
+    execution_mode: MESSAGES
+    label: RAG Policies
+    config:
+      agentId: c1abd69c-e5a5-4b63-b1e4-0cc94cafcedf
+      knowledgeBaseIds:
+        - effbf0b6-5123-4068-a4af-d1844d333a65
+      primaryInput: "{{summarizer.output.text}}"
+
+edges:
+  - from: form_input
+    to: file_upload
+  - from: file_upload
+    to: summarizer
+  - from: summarizer
+    to: rag_agent
+
+entry: form_input
+exit: rag_agent

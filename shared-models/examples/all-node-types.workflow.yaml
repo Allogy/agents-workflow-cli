@@ -11,6 +11,7 @@
 
 name: All Node Types Reference
 description: A reference workflow exercising every WDF node type
+version: 1
 tags:
   - reference
   - testing
@@ -19,12 +20,14 @@ nodes:
   # --- Input Nodes ---
   text_input:
     type: plain_txt_input
+    execution_mode: INPUT
     label: Free Text Input
     config:
       placeholder: "Enter your question here..."
 
   form_input:
     type: structured_input
+    execution_mode: INPUT
     label: Customer Details Form
     config:
       schema:
@@ -42,6 +45,7 @@ nodes:
 
   file_input:
     type: file_upload
+    execution_mode: INPUT
     label: Upload Document
     config:
       acceptedFormats: [pdf, docx, png, jpg]
@@ -53,25 +57,28 @@ nodes:
   # --- Processing Nodes ---
   agent_node:
     type: agent
+    execution_mode: MESSAGES
     label: Research Agent
     config:
-      agentId: research-agent
-      agentConfig:
-        temperature: 0.7
-        maxTokens: 4096
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      system_prompt: You are a helpful research assistant.
+      temperature: 0.7
+      maxTokens: 4096
+      tools: []
 
   rag_node:
     type: rag_agent
+    execution_mode: MESSAGES
     label: Knowledge Base Agent
     config:
       agentId: kb-agent
       knowledgeBaseIds:
         - company-docs-kb
         - faq-kb
-      knowledgeBasesOverride: false
 
   llm_node:
     type: llm_call
+    execution_mode: MESSAGES
     label: Classify and Summarize
     config:
       model: anthropic.claude-sonnet-4-5-v2
@@ -86,10 +93,11 @@ nodes:
 
   output_node:
     type: structured_output
+    execution_mode: OUTPUT
     label: Format Response
     config:
       model: anthropic.claude-sonnet-4-5-v2
-      outputSchema:
+      schema:
         type: object
         properties:
           summary:
@@ -102,14 +110,18 @@ nodes:
   # --- Flow Nodes ---
   search_node:
     type: retrieve
+    execution_mode: FLOW
     label: Search Knowledge Base
     config:
       knowledgeBaseId: company-docs-kb
       topK: 5
       scoreThreshold: 0.7
+      enableReranking: false
+      includeMetadata: true
 
   extract_node:
     type: document_extraction
+    execution_mode: FLOW
     label: Extract Document Fields
     config:
       extractionMethod: llm
@@ -127,16 +139,22 @@ nodes:
           type: array
           required: true
       prompt: "Extract the title, author, date, and key points from this document."
+      extractTables: true
+      extractImages: false
 
   # --- Human Interaction Nodes ---
   review_node:
     type: human_review
+    execution_mode: FLOW
     label: Manager Approval
     config:
-      instructions: >
+      review_prompt: >
         Review the extracted data and classification results.
         Approve to proceed or reject to re-process.
       timeoutMinutes: 1440
+      allowApprove: true
+      allowReject: true
+      allowEdit: false
 
 edges:
   - from: text_input

@@ -1,0 +1,62 @@
+# agent-review.workflow.yaml
+# WDF equivalent of: backend/scripts/workflow_complete_tests/payloads/agent_review.json
+# Pattern: PLAIN_TXT_INPUT -> AGENT -> HUMAN_REVIEW -> STRUCTURED_OUTPUT (4-node)
+
+name: Agent + Human Review
+description: 4-node workflow — plain text input, agent processing, human review, structured output
+version: 1
+tags:
+  - test
+  - agent
+  - human-review
+
+nodes:
+  user_input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Enter Request
+    config:
+      placeholder: Enter your request for the agent
+
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    label: General Agent
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      system_prompt: You are a helpful assistant. Process the user's request and provide a detailed response.
+      temperature: 0.7
+      maxTokens: 2048
+      tools: []
+
+  review:
+    type: human_review
+    execution_mode: FLOW
+    label: Quality Review
+    config:
+      review_prompt: Please review the agent's response and approve to continue.
+      allowApprove: true
+      allowReject: true
+      allowEdit: false
+
+  output:
+    type: structured_output
+    execution_mode: OUTPUT
+    label: Reviewed Output
+    config:
+      schema:
+        type: object
+        properties: {}
+        required: []
+        additionalProperties: false
+
+edges:
+  - from: user_input
+    to: agent
+  - from: agent
+    to: review
+  - from: review
+    to: output
+
+entry: user_input
+exit: output

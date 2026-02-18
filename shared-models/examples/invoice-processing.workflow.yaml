@@ -4,6 +4,7 @@
 
 name: Invoice Processing Pipeline
 description: Extract data from uploaded invoices and route for approval
+version: 1
 tags:
   - finance
   - document-processing
@@ -11,6 +12,7 @@ tags:
 nodes:
   upload:
     type: file_upload
+    execution_mode: INPUT
     label: Upload Invoice
     config:
       acceptedFormats: [pdf, png, jpg]
@@ -20,6 +22,7 @@ nodes:
 
   extract:
     type: document_extraction
+    execution_mode: FLOW
     label: Extract Invoice Fields
     config:
       extractionMethod: llm
@@ -42,6 +45,7 @@ nodes:
 
   classify:
     type: llm_call
+    execution_mode: MESSAGES
     label: Classify Invoice
     config:
       model: anthropic.claude-sonnet-4-5-v2
@@ -56,12 +60,16 @@ nodes:
 
   review:
     type: human_review
+    execution_mode: FLOW
     label: Manager Approval
     config:
-      instructions: >
+      review_prompt: >
         Review the extracted invoice data and classification.
         Approve if data looks correct, reject to re-process.
       timeoutMinutes: 1440  # 24 hours
+      allowApprove: true
+      allowReject: true
+      allowEdit: false
 
 edges:
   - from: upload

@@ -1,0 +1,83 @@
+# retrieval-pipeline.workflow.yaml
+# WDF equivalent of: backend/scripts/workflow_complete_tests/payloads/retrieval_pipeline.json
+# Pattern: STRUCTURED_INPUT -> RETRIEVE -> DOCUMENT_EXTRACTION -> LLM_CALL -> STRUCTURED_OUTPUT (5-node)
+
+name: Retrieval Pipeline
+description: 5-node retrieval workflow — form input, vector search, document extraction, LLM summarization, structured output
+version: 1
+tags:
+  - test
+  - retrieve
+  - document-extraction
+
+nodes:
+  search_form:
+    type: structured_input
+    execution_mode: INPUT
+    label: Search Query
+    config:
+      schema:
+        type: object
+        properties:
+          query:
+            title: Search Query
+            type: string
+          max_results:
+            title: Max Results
+            type: string
+            default: 5
+        required:
+          - query
+
+  vector_search:
+    type: retrieve
+    execution_mode: FLOW
+    label: Vector Search
+    config:
+      knowledgeBaseId: effbf0b6-5123-4068-a4af-d1844d333a65
+      topK: 5
+      scoreThreshold: 0.7
+      enableReranking: false
+      includeMetadata: true
+
+  content_extractor:
+    type: document_extraction
+    execution_mode: FLOW
+    label: Content Extractor
+    config:
+      extractTables: true
+      extractImages: false
+
+  summarizer:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: Summarizer
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.5
+      maxTokens: 2048
+      template: "Based on the retrieved documents, provide a comprehensive summary:\n{{content_extractor.output.text}}"
+
+  search_results:
+    type: structured_output
+    execution_mode: OUTPUT
+    label: Search Results
+    config:
+      schema:
+        type: object
+        properties: {}
+        required: []
+        additionalProperties: false
+
+edges:
+  - from: search_form
+    to: vector_search
+  - from: vector_search
+    to: content_extractor
+  - from: content_extractor
+    to: summarizer
+  - from: summarizer
+    to: search_results
+
+entry: search_form
+exit: search_results

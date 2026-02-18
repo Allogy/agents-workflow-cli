@@ -121,10 +121,8 @@ from workflow_models.wdf import (
     EdgeDefinition,
     AgentConfig,
     PlainTxtInputConfig,
-    StructuredOutputConfig,
     extract_variable_refs,
 )
-from workflow_models.enums import EdgeType, ExecutionMode, NodeConfigType
 
 # Build a workflow programmatically
 workflow = WorkflowDefinition(
@@ -132,15 +130,15 @@ workflow = WorkflowDefinition(
     description='A simple two-node pipeline',
     nodes={
         'user-input': NodeDefinition(
-            type=NodeConfigType.PLAIN_TXT_INPUT,
+            type='PLAIN_TXT_INPUT',
             label='User Input',
-            execution_mode=ExecutionMode.INPUT,
+            execution_mode='INPUT',
             config=PlainTxtInputConfig(placeholder='Enter your question...'),
         ),
         'agent': NodeDefinition(
-            type=NodeConfigType.AGENT,
+            type='AGENT',
             label='Assistant',
-            execution_mode=ExecutionMode.MESSAGES,
+            execution_mode='MESSAGES',
             config=AgentConfig(
                 model='anthropic.claude-sonnet',
                 system_prompt='You are a helpful assistant.',
@@ -148,12 +146,10 @@ workflow = WorkflowDefinition(
         ),
     },
     edges=[
-        EdgeDefinition(
-            source='user-input',
-            target='agent',
-            type=EdgeType.STATIC,
-        ),
+        EdgeDefinition(from_node='user-input', to='agent'),
     ],
+    entry='user-input',
+    exit='agent',
 )
 
 # Extract variable references from a template string
@@ -167,6 +163,10 @@ Example `.workflow.yaml` files are in the [`examples/`](examples/) directory:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice pipeline
 - `all-node-types.workflow.yaml` — reference file with all 10 node types
+- `linear-pipeline.workflow.yaml` — 3-node pipeline (text input → LLM → structured output)
+- `rag-workflow.workflow.yaml` — 4-node RAG pipeline (structured input → file upload → LLM → RAG agent)
+- `agent-review.workflow.yaml` — 4-node agent pipeline with human review gate
+- `retrieval-pipeline.workflow.yaml` — 5-node retrieval pipeline with document extraction
 
 > **Note:** YAML serialization (load/dump) lives in the CLI layer
 > (`cli.wdf_yaml`), not in shared-models. The shared-models package has

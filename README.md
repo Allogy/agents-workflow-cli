@@ -101,6 +101,10 @@ workflow-cli/
     examples/                 # Example .workflow.yaml files
       invoice-processing.workflow.yaml
       all-node-types.workflow.yaml
+      linear-pipeline.workflow.yaml
+      rag-workflow.workflow.yaml
+      agent-review.workflow.yaml
+      retrieval-pipeline.workflow.yaml
     tests/
       test_wdf_nodes.py      # Node config schema tests
       test_wdf_workflow.py    # WorkflowDefinition / EdgeDefinition tests
@@ -164,6 +168,10 @@ See `shared-models/examples/` for reference YAML files:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice processing pipeline
 - `all-node-types.workflow.yaml` — reference file demonstrating all 10 node types
+- `linear-pipeline.workflow.yaml` — 3-node pipeline matching backend `linear_pipeline.json`
+- `rag-workflow.workflow.yaml` — 4-node RAG pipeline matching backend `rag_workflow.json`
+- `agent-review.workflow.yaml` — 4-node agent + human review pipeline matching backend `agent_review.json`
+- `retrieval-pipeline.workflow.yaml` — 5-node retrieval pipeline matching backend `retrieval_pipeline.json`
 
 ### Testing WDF
 
