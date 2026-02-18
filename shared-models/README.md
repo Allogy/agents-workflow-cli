@@ -10,6 +10,20 @@ This package provides the data contracts shared between the backend API and the 
 uv add agents-workflow-models
 ```
 
+### Install from CodeArtifact (Private)
+
+```bash
+# Get credentials (from the repo root)
+make codeartifact-login
+
+# Add as a dependency
+uv add agents-workflow-models \
+  --index-url "https://aws:<TOKEN>@<ENDPOINT>/simple/"
+```
+
+See [`../docs/codeartifact.md`](../docs/codeartifact.md) for setup, publishing,
+and CI/CD details.
+
 ## Usage
 
 ```python
