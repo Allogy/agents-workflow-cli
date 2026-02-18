@@ -89,6 +89,8 @@ workflow-cli/
       exceptions.py           # Typed API exception hierarchy
       wdf_yaml.py             # WDF YAML load/dump helpers (PyYAML wrapper)
       lockfile.py             # Lockfile management for idempotent push operations
+      commands/
+        push.py               # Push command — deploy workflows to platform
   shared-models/              # agents-workflow-models (published separately)
     pyproject.toml
     src/workflow_models/
@@ -121,11 +123,15 @@ workflow-cli/
     test_client.py            # WorkflowClient unit tests (pytest-httpx)
     test_exceptions.py        # API exception hierarchy tests
     test_lockfile.py          # Lockfile management tests (30 tests)
+    test_push_command.py      # Push command unit tests (20 tests)
     test_release_validation.py # Release validation coverage
     test_shared_models_integration.py
     test_wdf_yaml_roundtrip.py # WDF YAML round-trip serialization tests
   docs/
     codeartifact.md           # CodeArtifact setup, publishing, CI/CD
+    init-command.md           # init command documentation
+    validate-command.md       # validate command documentation
+    push-command.md           # push command documentation
   .pre-commit-config.yaml     # Pre-commit hook configuration
   README.md                   # This file
 ```
@@ -145,6 +151,9 @@ uv run workflow init --template rag-qa
 
 # Validate a workflow file
 uv run workflow validate my-workflow.workflow.yaml
+
+# Push a workflow to the platform
+uv run workflow push my-workflow.workflow.yaml
 ```
 
 ### Commands
@@ -153,6 +162,7 @@ uv run workflow validate my-workflow.workflow.yaml
 |---------|-------------|------|
 | `init` | Scaffold a new workflow from a template | [`docs/init-command.md`](docs/init-command.md) |
 | `validate` | Validate a workflow definition file offline | [`docs/validate-command.md`](docs/validate-command.md) |
+| `push` | Deploy a workflow to the platform (create or update) | [`docs/push-command.md`](docs/push-command.md) |
 
 ## API Client
 
@@ -304,6 +314,9 @@ uv run pytest
 The CLI includes lockfile support (`.workflow.lock`) for tracking the mapping between
 local workflow slugs and server-side UUIDs. This enables **idempotent push operations**
 — subsequent pushes update in place rather than creating duplicates.
+
+**See [`docs/push-command.md`](docs/push-command.md)** for full details on how lockfiles
+are used in the push workflow.
 
 ### Lockfile Format
 
