@@ -1,0 +1,75 @@
+# invoice-processing.workflow.yaml
+# Example: Document processing pipeline with extraction and human review.
+# Exercises: file_upload, document_extraction, llm_call, human_review
+
+name: Invoice Processing Pipeline
+description: Extract data from uploaded invoices and route for approval
+tags:
+  - finance
+  - document-processing
+
+nodes:
+  upload:
+    type: file_upload
+    label: Upload Invoice
+    config:
+      acceptedFormats: [pdf, png, jpg]
+      maxFileSize: 10485760  # 10MB
+      textExtraction: automatic
+      extractTables: true
+
+  extract:
+    type: document_extraction
+    label: Extract Invoice Fields
+    config:
+      extractionMethod: llm
+      fields:
+        - name: vendor_name
+          type: string
+          required: true
+        - name: invoice_number
+          type: string
+          required: true
+        - name: total_amount
+          type: number
+          required: true
+        - name: line_items
+          type: array
+          required: false
+      prompt: >
+        Extract the vendor name, invoice number, total amount,
+        and line items from this invoice document.
+
+  classify:
+    type: llm_call
+    label: Classify Invoice
+    config:
+      model: anthropic.claude-sonnet-4-5-v2
+      temperature: 0.0
+      maxTokens: 200
+      template: |
+        Given the following invoice data:
+        {{extract.output.extractedData}}
+
+        Classify this invoice into one of: SUPPLIES, SERVICES, EQUIPMENT, OTHER.
+        Respond with only the category name.
+
+  review:
+    type: human_review
+    label: Manager Approval
+    config:
+      instructions: >
+        Review the extracted invoice data and classification.
+        Approve if data looks correct, reject to re-process.
+      timeoutMinutes: 1440  # 24 hours
+
+edges:
+  - from: upload
+    to: extract
+  - from: extract
+    to: classify
+  - from: classify
+    to: review
+
+entry: upload
+exit: review

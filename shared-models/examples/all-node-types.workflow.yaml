@@ -1,0 +1,162 @@
+# all-node-types.workflow.yaml
+# Example: Exercises all 10 WDF node types in a single workflow.
+# This is a reference/test file — not a realistic workflow.
+#
+# Node types covered:
+#   1. plain_txt_input     6. llm_call
+#   2. structured_input    7. structured_output
+#   3. file_upload         8. retrieve
+#   4. agent               9. document_extraction
+#   5. rag_agent          10. human_review
+
+name: All Node Types Reference
+description: A reference workflow exercising every WDF node type
+tags:
+  - reference
+  - testing
+
+nodes:
+  # --- Input Nodes ---
+  text_input:
+    type: plain_txt_input
+    label: Free Text Input
+    config:
+      placeholder: "Enter your question here..."
+
+  form_input:
+    type: structured_input
+    label: Customer Details Form
+    config:
+      schema:
+        type: object
+        required: [name, email]
+        properties:
+          name:
+            type: string
+            minLength: 1
+          email:
+            type: string
+            format: email
+          phone:
+            type: string
+
+  file_input:
+    type: file_upload
+    label: Upload Document
+    config:
+      acceptedFormats: [pdf, docx, png, jpg]
+      maxFileSize: 10485760
+      textExtraction: automatic
+      extractTables: true
+      preserveFormatting: false
+
+  # --- Processing Nodes ---
+  agent_node:
+    type: agent
+    label: Research Agent
+    config:
+      agentId: research-agent
+      agentConfig:
+        temperature: 0.7
+        maxTokens: 4096
+
+  rag_node:
+    type: rag_agent
+    label: Knowledge Base Agent
+    config:
+      agentId: kb-agent
+      knowledgeBaseIds:
+        - company-docs-kb
+        - faq-kb
+      knowledgeBasesOverride: false
+
+  llm_node:
+    type: llm_call
+    label: Classify and Summarize
+    config:
+      model: anthropic.claude-sonnet-4-5-v2
+      temperature: 0.3
+      maxTokens: 2048
+      topP: 0.9
+      template: |
+        Given the user input: {{text_input.output.text}}
+        And the agent analysis: {{agent_node.output.response}}
+
+        Provide a classification and brief summary.
+
+  output_node:
+    type: structured_output
+    label: Format Response
+    config:
+      model: anthropic.claude-sonnet-4-5-v2
+      outputSchema:
+        type: object
+        properties:
+          summary:
+            type: string
+          confidence:
+            type: number
+          category:
+            type: string
+
+  # --- Flow Nodes ---
+  search_node:
+    type: retrieve
+    label: Search Knowledge Base
+    config:
+      knowledgeBaseId: company-docs-kb
+      topK: 5
+      scoreThreshold: 0.7
+
+  extract_node:
+    type: document_extraction
+    label: Extract Document Fields
+    config:
+      extractionMethod: llm
+      fields:
+        - name: title
+          type: string
+          required: true
+        - name: author
+          type: string
+          required: false
+        - name: date
+          type: string
+          required: false
+        - name: key_points
+          type: array
+          required: true
+      prompt: "Extract the title, author, date, and key points from this document."
+
+  # --- Human Interaction Nodes ---
+  review_node:
+    type: human_review
+    label: Manager Approval
+    config:
+      instructions: >
+        Review the extracted data and classification results.
+        Approve to proceed or reject to re-process.
+      timeoutMinutes: 1440
+
+edges:
+  - from: text_input
+    to: agent_node
+  - from: form_input
+    to: search_node
+  - from: file_input
+    to: extract_node
+  - from: agent_node
+    to: rag_node
+  - from: rag_node
+    to: llm_node
+  - from: search_node
+    to: llm_node
+  - from: extract_node
+    to: llm_node
+  - from: llm_node
+    to: output_node
+  - from: output_node
+    to: review_node
+
+entry: text_input
+exit: review_node
