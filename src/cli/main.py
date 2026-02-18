@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from enum import Enum
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 
 from cli import __version__
+from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
 
 app = typer.Typer(
@@ -100,3 +102,31 @@ def main(
         org_id=org,
         output_format=output_format.value if output_format else None,
     )
+
+
+@app.command()
+def validate(
+    file_path: Annotated[
+        Path,
+        typer.Argument(
+            help='Path to .workflow.yaml file to validate.',
+            exists=False,  # We handle existence check in the command
+        ),
+    ],
+) -> None:
+    """Validate a workflow definition file offline.
+
+    Runs 9 validation checks with no API calls:
+    - YAML syntax
+    - WDF schema conformance
+    - Node type recognition
+    - Edge references
+    - Entry/exit points
+    - Graph reachability
+    - Cycle detection
+    - Variable references
+    - Node config validation
+
+    Exit codes: 0 = pass (warnings OK), 1 = failure
+    """
+    validate_command(file_path)
