@@ -11,13 +11,10 @@ YAML files can be loaded, validated, and written back without data loss.
 """
 
 import yaml
-
-from workflow_models.wdf.edges import EdgeDefinition
-from workflow_models.wdf.nodes import NodeDefinition
 from workflow_models.wdf.workflow import WorkflowDefinition
 
 # Helper to import the CLI-layer YAML helpers
-from cli.wdf_yaml import load_workflow_yaml, dump_workflow_yaml
+from cli.wdf_yaml import dump_workflow_yaml, load_workflow_yaml
 
 
 class TestLoadWorkflowYaml:
@@ -238,7 +235,7 @@ exit: review
             assert wf2.nodes[slug].config == wf.nodes[slug].config
 
         # Deep edge comparison
-        for e1, e2 in zip(wf.edges, wf2.edges):
+        for e1, e2 in zip(wf.edges, wf2.edges, strict=True):
             assert e1.from_node == e2.from_node
             assert e1.to == e2.to
 
