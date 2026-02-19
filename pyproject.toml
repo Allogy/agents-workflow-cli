@@ -40,6 +40,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: live API integration tests (require --host, --api-key, --org flags)",
+]
 
 [tool.ruff]
 line-length = 100
