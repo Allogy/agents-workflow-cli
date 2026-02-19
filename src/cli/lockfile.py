@@ -50,6 +50,13 @@ class WorkflowLock(BaseModel):
         default_factory=dict,
         description='Mapping of edge key (source->target) to server-side edge ID',
     )
+    dependencies: dict[str, UUID] = Field(
+        default_factory=dict,
+        description=(
+            'Cached dependency name-to-UUID mappings from previous push. '
+            "Keys are in the format 'agent:{name}' or 'kb:{name}'."
+        ),
+    )
     pushed_at: datetime = Field(..., description='Timestamp of last successful push')
 
     @field_validator('version')
@@ -75,15 +82,18 @@ class WorkflowLock(BaseModel):
 
         UUID fields are converted to strings for YAML serialization.
         """
-        return {
+        data: dict[str, Any] = {
             'workflow_id': str(self.workflow_id),
             'organization_id': str(self.organization_id),
             'version': self.version,
             'instance': self.instance,
             'nodes': {slug: str(uuid) for slug, uuid in self.nodes.items()},
             'edges': self.edges.copy(),
-            'pushed_at': self.pushed_at.isoformat(),
         }
+        if self.dependencies:
+            data['dependencies'] = {key: str(uuid) for key, uuid in self.dependencies.items()}
+        data['pushed_at'] = self.pushed_at.isoformat()
+        return data
 
     @classmethod
     def from_yaml_dict(cls, data: dict[str, Any]) -> WorkflowLock:
@@ -102,6 +112,9 @@ class WorkflowLock(BaseModel):
                 instance=data['instance'],
                 nodes={slug: UUID(uuid_str) for slug, uuid_str in data.get('nodes', {}).items()},
                 edges=data.get('edges', {}),
+                dependencies={
+                    key: UUID(uuid_str) for key, uuid_str in data.get('dependencies', {}).items()
+                },
                 pushed_at=datetime.fromisoformat(data['pushed_at']),
             )
         except (KeyError, TypeError) as e:
