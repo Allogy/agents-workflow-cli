@@ -61,23 +61,38 @@ def find_workflow_by_name(client: WorkflowClient, name: str, org_id: str) -> str
     """
     workflows = client.list_workflows(organization_id=org_id)
 
+    # Fetch metadata for each workflow to get names
+    workflows_with_names = []
+    for workflow in workflows:
+        try:
+            metadata = client.get_metadata(workflow.id)
+            if metadata.name:
+                workflows_with_names.append((workflow, metadata.name))
+        except Exception:
+            # Skip workflows without metadata
+            continue
+
     # First try exact match (case-insensitive)
-    exact_matches = [w for w in workflows if w.name and w.name.lower() == name.lower()]
+    exact_matches = [
+        (w, w_name) for w, w_name in workflows_with_names if w_name.lower() == name.lower()
+    ]
 
     if len(exact_matches) == 1:
-        return str(exact_matches[0].id)
+        return str(exact_matches[0][0].id)
     if len(exact_matches) > 1:
         raise ValueError(
             f'Multiple workflows found with name "{name}". Please use the workflow ID instead.'
         )
 
     # Try partial match (case-insensitive)
-    partial_matches = [w for w in workflows if w.name and name.lower() in w.name.lower()]
+    partial_matches = [
+        (w, w_name) for w, w_name in workflows_with_names if name.lower() in w_name.lower()
+    ]
 
     if len(partial_matches) == 1:
-        return str(partial_matches[0].id)
+        return str(partial_matches[0][0].id)
     if len(partial_matches) > 1:
-        match_names = [w.name for w in partial_matches]
+        match_names = [w_name for _, w_name in partial_matches]
         raise ValueError(
             f'Multiple workflows found matching "{name}": {", ".join(match_names)}. '
             f'Please be more specific or use the workflow ID.'
@@ -109,11 +124,16 @@ def delete_command(config: CLIConfig, identifier: str, force: bool = False) -> N
 
             # Fetch workflow to verify it exists and get its name
             try:
-                workflow = client.get_workflow(workflow_id)
-                workflow_name = workflow.name or 'Untitled'
+                _ = client.get_workflow(workflow_id)  # Verify workflow exists
+                # Fetch metadata to get the name
+                try:
+                    metadata = client.get_metadata(workflow_id)
+                    workflow_name = metadata.name or 'Untitled'
+                except Exception:
+                    workflow_name = 'Untitled'
             except Exception as e:
                 console.print(f'[bold red]Error:[/bold red] Workflow not found: {identifier}')
-                raise NotFoundError(f'Workflow {identifier} not found') from e
+                raise NotFoundError(f'Workflow {identifier} not found', status_code=404) from e
         else:
             # Search by name
             workflow_name = identifier
@@ -127,7 +147,7 @@ def delete_command(config: CLIConfig, identifier: str, force: bool = False) -> N
                 console.print(
                     f'[bold red]Error:[/bold red] No workflow found with name "{identifier}"'
                 )
-                raise NotFoundError(f'Workflow "{identifier}" not found')
+                raise NotFoundError(f'Workflow "{identifier}" not found', status_code=404)
 
         # Show confirmation prompt (unless --force)
         if not force:

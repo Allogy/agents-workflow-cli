@@ -13,7 +13,6 @@ from uuid import uuid4
 
 import pytest
 from typer.testing import CliRunner
-from workflow_models import WorkflowPublic
 
 from cli.main import app
 
@@ -35,10 +34,21 @@ def mock_workflow():
         created_by=user_id,
         created_at=datetime(2026, 2, 1, 10, 0, 0, tzinfo=UTC),
         updated_at=datetime(2026, 2, 18, 14, 30, 0, tzinfo=UTC),
-        name='Test Workflow',
     )
-    
+
     return wf
+
+
+@pytest.fixture
+def mock_metadata(mock_workflow):
+    """Create mock metadata for the test workflow."""
+    return SimpleNamespace(
+        workflow_id=mock_workflow.id,
+        name='Test Workflow',
+        description='A test workflow',
+        tags=['test'],
+        is_active=True,
+    )
 
 
 class TestDeleteWorkflowByID:
@@ -53,11 +63,14 @@ class TestDeleteWorkflowByID:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_delete_by_id_with_confirmation(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_delete_by_id_with_confirmation(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test delete by UUID with confirmation prompt."""
         # Setup mocks
         mock_client = MagicMock()
         mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client.delete_workflow.return_value = None
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
         mock_confirm.return_value = True  # User confirms
@@ -90,11 +103,14 @@ class TestDeleteWorkflowByID:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_delete_by_id_cancelled(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_delete_by_id_cancelled(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test delete cancelled by user."""
         # Setup mocks
         mock_client = MagicMock()
         mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
         mock_confirm.return_value = False  # User cancels
 
@@ -157,11 +173,14 @@ class TestDeleteWorkflowByName:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_delete_by_exact_name(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_delete_by_exact_name(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test delete by exact workflow name."""
         # Setup mocks
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = [mock_workflow]
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client.delete_workflow.return_value = None
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
         mock_confirm.return_value = True
@@ -191,10 +210,13 @@ class TestDeleteWorkflowByName:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_delete_by_fuzzy_name(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_delete_by_fuzzy_name(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test delete with fuzzy name matching (case-insensitive)."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = [mock_workflow]
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client.delete_workflow.return_value = None
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
         mock_confirm.return_value = True
@@ -244,7 +266,9 @@ class TestDeleteWorkflowByName:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_delete_by_name_multiple_matches(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_delete_by_name_multiple_matches(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test delete when multiple workflows match the name (ambiguous)."""
         from datetime import UTC, datetime
 
@@ -256,11 +280,27 @@ class TestDeleteWorkflowByName:
             created_by=mock_workflow.created_by,
             created_at=datetime(2026, 2, 1, 10, 0, 0, tzinfo=UTC),
             updated_at=datetime(2026, 2, 18, 14, 30, 0, tzinfo=UTC),
+        )
+
+        metadata2 = SimpleNamespace(
+            workflow_id=workflow2.id,
             name='Test Workflow 2',
+            description='Another test workflow',
+            tags=['test'],
+            is_active=True,
         )
 
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = [mock_workflow, workflow2]
+
+        # Return different metadata based on workflow_id
+        def get_meta(wf_id):
+            if str(wf_id) == str(mock_workflow.id):
+                return mock_metadata
+            else:
+                return metadata2
+
+        mock_client.get_metadata.side_effect = get_meta
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
         mock_confirm.return_value = True
 
@@ -295,10 +335,13 @@ class TestDeleteWorkflowForce:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_force_flag_skips_confirmation(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_force_flag_skips_confirmation(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test that --force flag bypasses confirmation prompt."""
         mock_client = MagicMock()
         mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client.delete_workflow.return_value = None
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
@@ -329,10 +372,13 @@ class TestDeleteWorkflowForce:
 
     @patch('cli.commands.delete.Confirm.ask')
     @patch('cli.commands.delete.WorkflowClient')
-    def test_force_delete_by_name(self, mock_client_class, mock_confirm, mock_workflow):
+    def test_force_delete_by_name(
+        self, mock_client_class, mock_confirm, mock_workflow, mock_metadata
+    ):
         """Test force delete with workflow name."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = [mock_workflow]
+        mock_client.get_metadata.return_value = mock_metadata
         mock_client.delete_workflow.return_value = None
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 

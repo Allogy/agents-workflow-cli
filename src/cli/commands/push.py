@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from rich.console import Console
 from workflow_models.wdf import WorkflowDefinition
@@ -123,7 +123,7 @@ def wdf_to_api_payload(
     layout: dict[str, tuple[int, int]],
     org_id: UUID,
     existing_workflow_id: UUID | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, UUID]]:
     """Convert WDF model to SaveCompleteWorkflowRequest payload.
 
     Args:
@@ -134,15 +134,49 @@ def wdf_to_api_payload(
         existing_workflow_id: If updating, the existing workflow UUID.
 
     Returns:
-        Dictionary payload ready for POST /v1/workflows/complete.
+        Tuple of (payload dictionary, slug_to_uuid mapping).
+        The payload is ready for POST /v1/workflows/complete.
+        The slug_to_uuid dict maps node slugs to their generated UUIDs.
     """
+    # Generate UUIDs for all nodes upfront so edges can reference them
+    slug_to_uuid: dict[str, UUID] = {}
+    for node_slug in workflow.nodes.keys():
+        slug_to_uuid[node_slug] = uuid4()
+
+    # Determine entry and exit points
+    entry_uuid: UUID | None = None
+    exit_uuid: UUID | None = None
+    if workflow.entry:
+        entry_uuid = slug_to_uuid.get(workflow.entry)
+    if workflow.exit:
+        exit_uuid = slug_to_uuid.get(workflow.exit)
+
+    # Build the workflow object (no name/description here)
+    workflow_obj: dict[str, Any] = {
+        'version': workflow.version,
+        'organization_id': str(org_id),
+        'state_schema': {},
+        'execution_config': {},
+    }
+    if entry_uuid:
+        workflow_obj['entry_point'] = str(entry_uuid)
+    if exit_uuid:
+        workflow_obj['exit_point'] = str(exit_uuid)
+
+    # Build metadata object (name, description, tags)
+    metadata: dict[str, Any] = {
+        'name': workflow.name,
+        'description': workflow.description or '',
+        'tags': workflow.tags or [],
+        'is_active': True,
+        'custom_fields': {},
+    }
+
+    # Start building the payload
     payload: dict[str, Any] = {
-        'workflow': {
-            'name': workflow.name,
-            'description': workflow.description or '',
-            'version': workflow.version,
-            'organization_id': str(org_id),
-        },
+        'workflow_id': str(existing_workflow_id) if existing_workflow_id else None,
+        'workflow': workflow_obj,
+        'metadata': metadata,
         'nodes': [],
         'node_inputs': [],
         'node_outputs': [],
@@ -151,11 +185,10 @@ def wdf_to_api_payload(
         'edge_visuals': [],
     }
 
-    if existing_workflow_id:
-        payload['workflow']['id'] = str(existing_workflow_id)
-
     # Convert nodes
     for node_slug, node_def in workflow.nodes.items():
+        node_uuid = slug_to_uuid[node_slug]
+
         # Clone config and resolve dependencies
         node_config = node_def.config.copy()
 
@@ -173,33 +206,42 @@ def wdf_to_api_payload(
             if kb_key in resolved_deps:
                 node_config['knowledge_base_id'] = str(resolved_deps[kb_key])
 
+        # Build node payload with correct schema
         node_payload = {
-            'slug': node_slug,
-            'node_config_type': node_def.type,
-            'execution_mode': node_def.execution_mode,
-            'label': node_def.label,
+            'id': str(node_uuid),
+            'workflow_version': workflow.version,
+            'config_type': node_def.type.upper(),  # Backend expects UPPERCASE enum values
+            'execution_mode': node_def.execution_mode.upper(),  # Ensure uppercase
+            'function_name': None,
+            'parameters': {},
+            'retry_policy': {'max_retries': 3},
+            'timeout_seconds': 30,
             'config': node_config,
+            'delegated_response': False,
+            'step_type': 'STEP',
+            'join_config': {},
         }
         payload['nodes'].append(node_payload)
 
-        # Generate node I/O based on node type
+        # Generate node outputs based on node type
         # Most nodes have at least one output
         if node_def.type not in ['structured_output']:
             payload['node_outputs'].append(
                 {
-                    'node_slug': node_slug,
-                    'name': 'output',
-                    'data_type': 'any',
+                    'node_id': str(node_uuid),
+                    'output_name': 'output',  # Not 'name'
+                    'sequence_order': 0,
                 }
             )
 
+        # Generate node inputs based on node type
         # Most nodes (except input nodes) have at least one input
         if node_def.type not in ['plain_txt_input', 'structured_input', 'file_upload']:
             payload['node_inputs'].append(
                 {
-                    'node_slug': node_slug,
-                    'name': 'input',
-                    'data_type': 'any',
+                    'node_id': str(node_uuid),
+                    'input_name': 'input',  # Not 'name'
+                    'sequence_order': 0,
                 }
             )
 
@@ -208,22 +250,37 @@ def wdf_to_api_payload(
             x, y = layout[node_slug]
             payload['node_visuals'].append(
                 {
-                    'node_slug': node_slug,
+                    'node_id': str(node_uuid),
                     'position_x': x,
                     'position_y': y,
+                    'width': 180,
+                    'height': 80,
+                    'style': {},
+                    'collapsed': False,
                 }
             )
 
     # Convert edges
     for edge_def in workflow.edges:
+        source_uuid = slug_to_uuid.get(edge_def.from_node)
+        target_uuid = slug_to_uuid.get(edge_def.to)
+
+        if not source_uuid or not target_uuid:
+            raise PushError(
+                f'Edge references unknown node: {edge_def.from_node} -> {edge_def.to}'
+            )
+
         edge_payload = {
-            'source_node_slug': edge_def.from_node,
-            'target_node_slug': edge_def.to,
+            'workflow_version': workflow.version,
+            'source_node_id': str(source_uuid),
+            'target_node_id': str(target_uuid),
             'edge_type': edge_def.type or 'STATIC',
+            'condition_function': None,
+            'data_mapping': {},
         }
         payload['edges'].append(edge_payload)
 
-    return payload
+    return payload, slug_to_uuid
 
 
 def push_workflow(
@@ -311,7 +368,7 @@ def push_workflow(
         if not org_id:
             raise PushError('Organization ID is required (set via --org or WORKFLOW_ORG_ID)')
 
-        payload = wdf_to_api_payload(workflow, resolved_deps, layout, org_id, workflow_id)
+        payload, slug_to_uuid = wdf_to_api_payload(workflow, resolved_deps, layout, org_id, workflow_id)
 
         # Step 6: Call atomic save endpoint
         console.print(f'[dim]Pushing to {config.host}...[/dim]', end=' ')
@@ -332,14 +389,9 @@ def push_workflow(
             pushed_at=datetime.now(UTC),
         )
 
-        # Map node slugs to UUIDs from response
-        # Match nodes by order (payload order matches response order)
-        node_slugs = list(workflow.nodes.keys())
-        for idx, node in enumerate(response.nodes):
-            if idx < len(node_slugs):
-                slug = node_slugs[idx]
-                node_uuid = UUID(str(node.id))
-                lock.set_node_uuid(slug, node_uuid)
+        # Map node slugs to UUIDs using our generated mappings
+        for slug, node_uuid in slug_to_uuid.items():
+            lock.set_node_uuid(slug, node_uuid)
 
         # Map edge pairs to IDs from response
         # Match edges by order (payload order matches response order)

@@ -73,9 +73,19 @@ def list_workflows_table(config: CLIConfig) -> None:
     with WorkflowClient.from_config(config) as client:
         workflows = client.list_workflows(organization_id=config.org_id)
 
-    if not workflows:
-        console.print('[yellow]No workflows found in this organization.[/yellow]')
-        return
+        if not workflows:
+            console.print('[yellow]No workflows found in this organization.[/yellow]')
+            return
+
+        # Fetch metadata for each workflow
+        workflow_metadata = {}
+        for workflow in workflows:
+            try:
+                metadata = client.get_metadata(workflow.id)
+                workflow_metadata[str(workflow.id)] = metadata
+            except Exception:
+                # If metadata fetch fails, continue without it
+                workflow_metadata[str(workflow.id)] = None
 
     # Create table
     table = Table(title='Workflows', show_header=True, header_style='bold magenta')
@@ -85,9 +95,13 @@ def list_workflows_table(config: CLIConfig) -> None:
 
     # Add rows
     for workflow in workflows:
-        # WorkflowPublic doesn't have name attribute - use ID as placeholder
-        # In production, would need to fetch metadata or use enriched response
-        name = getattr(workflow, 'name', None) or f'Workflow {truncate_uuid(str(workflow.id))}'
+        # Get name from metadata if available
+        metadata = workflow_metadata.get(str(workflow.id))
+        if metadata and metadata.name:
+            name = metadata.name
+        else:
+            name = f'Workflow {truncate_uuid(str(workflow.id))}'
+
         table.add_row(
             name,
             truncate_uuid(str(workflow.id)),
@@ -106,6 +120,16 @@ def list_workflows_json(config: CLIConfig) -> None:
     with WorkflowClient.from_config(config) as client:
         workflows = client.list_workflows(organization_id=config.org_id)
 
+        # Fetch metadata for each workflow
+        workflow_metadata = {}
+        for workflow in workflows:
+            try:
+                metadata = client.get_metadata(workflow.id)
+                workflow_metadata[str(workflow.id)] = metadata
+            except Exception:
+                # If metadata fetch fails, continue without it
+                workflow_metadata[str(workflow.id)] = None
+
     # Convert to JSON-serializable format
     output = []
     for workflow in workflows:
@@ -113,22 +137,27 @@ def list_workflows_json(config: CLIConfig) -> None:
         created_at = workflow.created_at
         if created_at and hasattr(created_at, 'isoformat'):
             created_at = created_at.isoformat()
-        
+
         updated_at = workflow.updated_at
         if updated_at and hasattr(updated_at, 'isoformat'):
             updated_at = updated_at.isoformat()
-        
-        output.append({
-            'id': str(workflow.id),
-            'version': workflow.version,
-            'organization_id': str(workflow.organization_id),
-            'created_by': str(workflow.created_by),
-            'created_at': created_at,
-            'updated_at': updated_at,
-            # Include optional metadata if available (monkey-patched in tests)
-            'name': getattr(workflow, 'name', None),
-            'description': getattr(workflow, 'description', None),
-        })
+
+        # Get metadata if available
+        metadata = workflow_metadata.get(str(workflow.id))
+
+        output.append(
+            {
+                'id': str(workflow.id),
+                'version': workflow.version,
+                'organization_id': str(workflow.organization_id),
+                'created_by': str(workflow.created_by),
+                'created_at': created_at,
+                'updated_at': updated_at,
+                # Include metadata if available
+                'name': metadata.name if metadata else None,
+                'description': metadata.description if metadata else None,
+            }
+        )
 
     # Print JSON (suitable for piping)
     print(json.dumps(output, indent=2))
@@ -143,6 +172,16 @@ def list_workflows_yaml(config: CLIConfig) -> None:
     with WorkflowClient.from_config(config) as client:
         workflows = client.list_workflows(organization_id=config.org_id)
 
+        # Fetch metadata for each workflow
+        workflow_metadata = {}
+        for workflow in workflows:
+            try:
+                metadata = client.get_metadata(workflow.id)
+                workflow_metadata[str(workflow.id)] = metadata
+            except Exception:
+                # If metadata fetch fails, continue without it
+                workflow_metadata[str(workflow.id)] = None
+
     # Convert to YAML-serializable format
     output = []
     for workflow in workflows:
@@ -150,22 +189,27 @@ def list_workflows_yaml(config: CLIConfig) -> None:
         created_at = workflow.created_at
         if created_at and hasattr(created_at, 'isoformat'):
             created_at = created_at.isoformat()
-        
+
         updated_at = workflow.updated_at
         if updated_at and hasattr(updated_at, 'isoformat'):
             updated_at = updated_at.isoformat()
-        
-        output.append({
-            'id': str(workflow.id),
-            'version': workflow.version,
-            'organization_id': str(workflow.organization_id),
-            'created_by': str(workflow.created_by),
-            'created_at': created_at,
-            'updated_at': updated_at,
-            # Include optional metadata if available (monkey-patched in tests)
-            'name': getattr(workflow, 'name', None),
-            'description': getattr(workflow, 'description', None),
-        })
+
+        # Get metadata if available
+        metadata = workflow_metadata.get(str(workflow.id))
+
+        output.append(
+            {
+                'id': str(workflow.id),
+                'version': workflow.version,
+                'organization_id': str(workflow.organization_id),
+                'created_by': str(workflow.created_by),
+                'created_at': created_at,
+                'updated_at': updated_at,
+                # Include metadata if available
+                'name': metadata.name if metadata else None,
+                'description': metadata.description if metadata else None,
+            }
+        )
 
     # Print YAML
     print(yaml.dump(output, default_flow_style=False, sort_keys=False))

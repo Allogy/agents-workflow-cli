@@ -15,7 +15,6 @@ from uuid import uuid4
 import pytest
 import yaml
 from typer.testing import CliRunner
-from workflow_models import WorkflowPublic
 
 from cli.main import app
 
@@ -25,7 +24,7 @@ runner = CliRunner()
 @pytest.fixture
 def mock_workflows():
     """Create mock workflow data for testing.
-    
+
     Note: WorkflowPublic doesn't have name/description fields directly.
     Those are in WorkflowMetadataPublic. For these tests we use SimpleNamespace
     to simulate workflows with name attributes.
@@ -43,9 +42,8 @@ def mock_workflows():
         created_by=user_id,
         created_at=datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC),
         updated_at=datetime(2026, 2, 18, 14, 30, 0, tzinfo=UTC),
-        name='Invoice Processing',
     )
-    
+
     wf2 = SimpleNamespace(
         id=workflow2_id,
         version=2,
@@ -53,10 +51,30 @@ def mock_workflows():
         created_by=user_id,
         created_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
         updated_at=datetime(2026, 2, 17, 9, 15, 0, tzinfo=UTC),
-        name='Customer Onboarding',
     )
-    
+
     return [wf1, wf2]
+
+
+@pytest.fixture
+def mock_metadata(mock_workflows):
+    """Create mock metadata for workflows."""
+    return {
+        str(mock_workflows[0].id): SimpleNamespace(
+            workflow_id=mock_workflows[0].id,
+            name='Invoice Processing',
+            description='Process invoices',
+            tags=['finance'],
+            is_active=True,
+        ),
+        str(mock_workflows[1].id): SimpleNamespace(
+            workflow_id=mock_workflows[1].id,
+            name='Customer Onboarding',
+            description='Onboard customers',
+            tags=['sales'],
+            is_active=True,
+        ),
+    }
 
 
 class TestListWorkflowsTable:
@@ -68,11 +86,13 @@ class TestListWorkflowsTable:
     """
 
     @patch('cli.commands.list.WorkflowClient')
-    def test_list_displays_table_format(self, mock_client_class, mock_workflows):
+    def test_list_displays_table_format(self, mock_client_class, mock_workflows, mock_metadata):
         """Test that list command displays workflows in table format by default."""
         # Setup mock client
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = mock_workflows
+        # Mock get_metadata to return metadata for each workflow
+        mock_client.get_metadata.side_effect = lambda wf_id: mock_metadata[str(wf_id)]
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         # Run command with required config
@@ -107,10 +127,11 @@ class TestListWorkflowsTable:
         )
 
     @patch('cli.commands.list.WorkflowClient')
-    def test_list_truncates_long_ids(self, mock_client_class, mock_workflows):
+    def test_list_truncates_long_ids(self, mock_client_class, mock_workflows, mock_metadata):
         """Test that UUIDs are truncated for better display."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = mock_workflows
+        mock_client.get_metadata.side_effect = lambda wf_id: mock_metadata[str(wf_id)]
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         result = runner.invoke(
@@ -167,10 +188,11 @@ class TestListWorkflowsJSON:
     """
 
     @patch('cli.commands.list.WorkflowClient')
-    def test_list_json_format(self, mock_client_class, mock_workflows):
+    def test_list_json_format(self, mock_client_class, mock_workflows, mock_metadata):
         """Test that --format json outputs valid JSON."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = mock_workflows
+        mock_client.get_metadata.side_effect = lambda wf_id: mock_metadata[str(wf_id)]
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         result = runner.invoke(
@@ -233,10 +255,11 @@ class TestListWorkflowsYAML:
     """Test list workflows in YAML format (bonus feature)."""
 
     @patch('cli.commands.list.WorkflowClient')
-    def test_list_yaml_format(self, mock_client_class, mock_workflows):
+    def test_list_yaml_format(self, mock_client_class, mock_workflows, mock_metadata):
         """Test that --format yaml outputs valid YAML."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = mock_workflows
+        mock_client.get_metadata.side_effect = lambda wf_id: mock_metadata[str(wf_id)]
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         result = runner.invoke(
