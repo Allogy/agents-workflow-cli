@@ -122,8 +122,8 @@ workflow-cli/
     conftest.py               # Shared test fixtures
     test_client.py            # WorkflowClient unit tests (pytest-httpx)
     test_exceptions.py        # API exception hierarchy tests
-    test_lockfile.py          # Lockfile management tests (30 tests)
-    test_push_command.py      # Push command unit tests (20 tests)
+    test_lockfile.py          # Lockfile management tests (38 tests)
+    test_push_command.py      # Push command unit tests (49 tests)
     test_release_validation.py # Release validation coverage
     test_shared_models_integration.py
     test_wdf_yaml_roundtrip.py # WDF YAML round-trip serialization tests
@@ -224,6 +224,8 @@ client = WorkflowClient.from_config(config)
 
 | Method | Description | Returns |
 |--------|-------------|---------|
+| `list_agents()` | List all accessible agents | `list[dict]` |
+| `list_knowledge_bases()` | List all accessible knowledge bases | `list[dict]` |
 | `find_agent_by_name(name)` | Find agent by name (case-insensitive) | `dict \| None` |
 | `find_knowledge_base_by_name(name)` | Find KB by name (case-insensitive) | `dict \| None` |
 
@@ -335,6 +337,9 @@ nodes:
   extract: b2c3d4e5-f6a7-8901-bcde-f12345678901
 edges:
   upload->extract: 1001
+dependencies:
+  agent:Customer Support Agent: 8cc8beec-11b2-4d35-a88b-424727111d6a
+  kb:Company Policies: 6c26048d-2f9c-4177-a126-f2ed8cd02a0e
 pushed_at: 2026-02-15T14:30:00Z
 ```
 
