@@ -43,7 +43,7 @@ dev = [
 
 [[package]]
 name = "agents-workflow-models"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "shared-models" }
 dependencies = [
     { name = "pydantic" },
