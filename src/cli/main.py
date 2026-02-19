@@ -13,6 +13,7 @@ from cli import __version__
 from cli.commands.delete import delete_command
 from cli.commands.init import init_command
 from cli.commands.list import list_command
+from cli.commands.pull import pull_workflow
 from cli.commands.push import push_workflow
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
@@ -210,6 +211,50 @@ def push(
     config = get_config()
     try:
         push_workflow(file_path, config)
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def pull(
+    identifier: Annotated[
+        str,
+        typer.Argument(
+            help='Workflow UUID or name to pull.',
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output file path. Defaults to <slugified-name>.workflow.yaml.',
+        ),
+    ] = None,
+) -> None:
+    """Pull a workflow from the platform to a local YAML file.
+
+    Exports a workflow to a .workflow.yaml definition file and generates a
+    .workflow.lock file for round-trip push/pull.
+
+    Supports pulling by UUID (exact) or by name (fuzzy matching with
+    interactive selection when multiple matches are found).
+
+    Agent and knowledge base UUIDs are reverse-resolved to human-readable
+    names. Visual-only data (node positions, edge paths) is stripped.
+
+    Exit codes: 0 = success, 1 = failure
+
+    Examples:
+        workflow pull abc123-def456-...
+        workflow pull abc123 -o invoices.workflow.yaml
+        workflow pull "Invoice Processing"
+        workflow pull "Invoice" --host https://api.example.com --api-key xxx
+    """
+    config = get_config()
+    try:
+        pull_workflow(identifier, config, output)
     except Exception as e:
         console.print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
