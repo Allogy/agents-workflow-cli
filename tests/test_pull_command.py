@@ -253,16 +253,25 @@ class TestGenerateSlug:
     """Test slug generation from node data with collision avoidance."""
 
     def test_slug_from_function_name(self):
-        """When function_name is set, use it as slug basis."""
+        """function_name is the primary slug source (lowercased, underscores preserved)."""
         slug = generate_slug(
-            function_name='my-agent',
+            function_name='My_Agent',
             config_type='AGENT',
             existing_slugs=set(),
         )
-        assert slug == 'my-agent'
+        assert slug == 'my_agent'
+
+    def test_slug_from_function_name_preserves_underscores(self):
+        """function_name underscores are preserved (not converted to hyphens)."""
+        slug = generate_slug(
+            function_name='plainTextInput_1',
+            config_type='PLAIN_TXT_INPUT',
+            existing_slugs=set(),
+        )
+        assert slug == 'plaintextinput_1'
 
     def test_slug_from_config_type_when_no_function_name(self):
-        """When function_name is None, fall back to config_type."""
+        """When function_name is None, fall back to config_type (via slugify)."""
         slug = generate_slug(
             function_name=None,
             config_type='LLM_CALL',
@@ -270,23 +279,23 @@ class TestGenerateSlug:
         )
         assert slug == 'llm-call'
 
-    def test_collision_appends_suffix(self):
-        """When slug already exists, append -2, -3, etc."""
+    def test_collision_appends_underscore_suffix(self):
+        """When slug already exists, append _2, _3, etc."""
         slug = generate_slug(
             function_name='agent',
             config_type='AGENT',
             existing_slugs={'agent'},
         )
-        assert slug == 'agent-2'
+        assert slug == 'agent_2'
 
     def test_multiple_collisions(self):
         """Handle multiple collisions."""
         slug = generate_slug(
             function_name='agent',
             config_type='AGENT',
-            existing_slugs={'agent', 'agent-2', 'agent-3'},
+            existing_slugs={'agent', 'agent_2', 'agent_3'},
         )
-        assert slug == 'agent-4'
+        assert slug == 'agent_4'
 
     def test_empty_function_name_falls_back(self):
         """Empty string function_name should fall back to config_type."""
@@ -297,14 +306,14 @@ class TestGenerateSlug:
         )
         assert slug == 'agent'
 
-    def test_function_name_gets_slugified(self):
-        """Function names with spaces/special chars are slugified."""
+    def test_function_name_lowercased_directly(self):
+        """Function names are lowercased directly, preserving original chars."""
         slug = generate_slug(
-            function_name='My Custom Agent!',
-            config_type='AGENT',
+            function_name='ragAgent_1',
+            config_type='RAG_AGENT',
             existing_slugs=set(),
         )
-        assert slug == 'my-custom-agent'
+        assert slug == 'ragagent_1'
 
 
 # ============================================================================
@@ -662,9 +671,9 @@ class TestSlugCollisions:
             kb_map={},
         )
 
-        # Should have 'agent' and 'agent-2'
+        # Should have 'agent' and 'agent_2'
         assert 'agent' in wdf.nodes
-        assert 'agent-2' in wdf.nodes
+        assert 'agent_2' in wdf.nodes
         assert 'result' in wdf.nodes
 
 
@@ -1686,13 +1695,13 @@ class TestApiResponseToWdfWithParameters:
         assert len(wdf.edges) == 2
 
         # --- Verify PLAIN_TXT_INPUT node ---
-        input_node = wdf.nodes['plaintextinput-1']
+        input_node = wdf.nodes['plaintextinput_1']
         assert input_node.type == 'plain_txt_input'
         assert input_node.execution_mode == 'INPUT'
         assert input_node.label == 'question'
 
         # --- Verify FILE_UPLOAD node ---
-        file_node = wdf.nodes['fileupload-1']
+        file_node = wdf.nodes['fileupload_1']
         assert file_node.type == 'file_upload'
         assert file_node.execution_mode == 'INPUT'
         assert file_node.label == 'File Upload 1'
@@ -1701,7 +1710,7 @@ class TestApiResponseToWdfWithParameters:
         assert file_node.config['textExtraction'] == 'automatic'
 
         # --- Verify RAG_AGENT node ---
-        rag_node = wdf.nodes['ragagent-1']
+        rag_node = wdf.nodes['ragagent_1']
         assert rag_node.type == 'rag_agent'
         assert rag_node.execution_mode == 'MESSAGES'
         assert rag_node.label == 'RAG Agent 1'
@@ -1712,7 +1721,7 @@ class TestApiResponseToWdfWithParameters:
         assert rag_node.config['knowledge_base_names'] == ['Invoice Knowledge Base']
         assert 'knowledgeBaseIds' not in rag_node.config
         # UUID reference in primaryInput should be replaced with slug
-        assert '{{fileupload-1.output.text}}' in rag_node.config['primaryInput']
+        assert '{{fileupload_1.output.text}}' in rag_node.config['primaryInput']
         assert str(file_uuid) not in rag_node.config['primaryInput']
 
     def test_execution_mode_is_plain_string(self):
@@ -1749,7 +1758,7 @@ class TestApiResponseToWdfWithParameters:
             {},
         )
 
-        node = wdf.nodes['input-1']
+        node = wdf.nodes['input_1']
         # execution_mode should be a plain string, not an enum
         assert node.execution_mode == 'INPUT'
         assert type(node.execution_mode) is str

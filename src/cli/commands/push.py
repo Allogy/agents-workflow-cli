@@ -36,8 +36,8 @@ from cli.wdf_yaml import load_workflow_yaml
 
 console = Console()
 
-# Regex for matching slug-based variable references like {{file-upload-1.output.text}}
-_SLUG_REFERENCE_RE = re.compile(r'\{\{([a-z0-9][a-z0-9-]*)')
+# Regex for matching slug-based variable references like {{file_upload_1.output.text}}
+_SLUG_REFERENCE_RE = re.compile(r'\{\{([a-z0-9][a-z0-9_-]*)')
 
 # Maps WDF node type to the ``type`` field value expected in backend parameters
 _WDF_TYPE_TO_PARAMS_TYPE: dict[str, str] = {

@@ -103,8 +103,10 @@ def generate_slug(
 ) -> str:
     """Generate a unique node slug.
 
-    Uses function_name as the primary slug source, falling back to config_type.
-    Handles collisions by appending -2, -3, etc.
+    Uses function_name (lowercased) as the primary slug source, preserving
+    underscores for compatibility with backend variable references.
+    Falls back to slugify(config_type) when function_name is absent.
+    Handles collisions by appending _2, _3, etc.
 
     Args:
         function_name: The node's function_name (may be None or empty).
@@ -114,9 +116,11 @@ def generate_slug(
     Returns:
         A unique slug string.
     """
-    # Determine base slug
+    # Determine base slug — use function_name directly (lowercased) to
+    # preserve underscores for backend template reference compatibility.
+    # Only fall back to slugify() for config_type (which needs normalization).
     if function_name and function_name.strip():
-        base = slugify(function_name)
+        base = function_name.strip().lower()
     else:
         base = slugify(config_type)
 
@@ -126,9 +130,9 @@ def generate_slug(
 
     # Handle collisions with numeric suffix
     counter = 2
-    while f'{base}-{counter}' in existing_slugs:
+    while f'{base}_{counter}' in existing_slugs:
         counter += 1
-    return f'{base}-{counter}'
+    return f'{base}_{counter}'
 
 
 # ---------------------------------------------------------------------------
