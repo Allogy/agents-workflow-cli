@@ -38,3 +38,5 @@ htmlcov/
 
 # Ruff
 .ruff_cache/
+*.workflow.lock
+*.workflow.yaml
