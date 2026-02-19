@@ -10,7 +10,9 @@ import typer
 from rich.console import Console
 
 from cli import __version__
+from cli.commands.delete import delete_command
 from cli.commands.init import init_command
+from cli.commands.list import list_command
 from cli.commands.push import push_workflow
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
@@ -208,6 +210,94 @@ def push(
     config = get_config()
     try:
         push_workflow(file_path, config)
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def list(
+    output_format: Annotated[
+        FormatChoice | None,
+        typer.Option(
+            '--format',
+            help='Output format: json, yaml, or table (default).',
+        ),
+    ] = None,
+) -> None:
+    """List workflows in the organization.
+
+    Displays all workflows accessible to your organization with various
+    output formats for different use cases.
+
+    Table format (default):
+    - Human-readable with columns: Name, ID (truncated), Updated
+    - Includes rich formatting and colors
+
+    JSON format:
+    - Machine-readable output suitable for piping to other tools
+    - Contains full workflow metadata
+
+    YAML format:
+    - Human-readable structured output
+    - Good for documentation or review
+
+    Exit codes: 0 = success, 1 = failure
+
+    Examples:
+        workflow list
+        workflow list --format json
+        workflow list --format yaml | grep "name:"
+    """
+    config = get_config()
+    try:
+        list_command(config, output_format.value if output_format else None)
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def delete(
+    identifier: Annotated[
+        str,
+        typer.Argument(
+            help='Workflow UUID or name to delete.',
+        ),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option(
+            '--force',
+            '-f',
+            help='Skip confirmation prompt.',
+        ),
+    ] = False,
+) -> None:
+    """Delete a workflow by ID or name.
+
+    Removes a workflow from the platform. Can identify workflows by either
+    their UUID or name (fuzzy matching supported).
+
+    By default, prompts for confirmation before deletion. Use --force to
+    skip the confirmation prompt.
+
+    Workflow name matching:
+    - Exact match (case-insensitive) is preferred
+    - Falls back to partial match if only one workflow contains the search term
+    - Returns error if multiple matches found (use UUID for precision)
+
+    Exit codes: 0 = success or cancelled, 1 = failure
+
+    Examples:
+        workflow delete abc123-def456-...
+        workflow delete "Invoice Processing"
+        workflow delete "customer onboarding" --force
+        workflow delete abc123 --force
+    """
+    config = get_config()
+    try:
+        delete_command(config, identifier, force)
     except Exception as e:
         console.print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
