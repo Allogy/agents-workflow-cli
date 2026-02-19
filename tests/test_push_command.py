@@ -10,6 +10,7 @@ from workflow_models.wdf import EdgeDefinition, NodeDefinition, WorkflowDefiniti
 from cli.commands.push import (
     DependencyResolutionError,
     PushError,
+    build_node_parameters,
     generate_node_layout,
     resolve_dependencies,
     wdf_to_api_payload,
@@ -356,8 +357,10 @@ def test_wdf_to_api_payload_resolves_agent_refs(workflow_with_agent):
     # Find the agent node by its UUID
     agent_node_uuid = slug_to_uuid['agent']
     agent_node = next(n for n in payload['nodes'] if n['id'] == str(agent_node_uuid))
-    assert agent_node['config']['agent_id'] == str(agent_uuid)
+    # agent_id should be in parameters as agentId (for frontend/runtime)
+    assert agent_node['parameters']['agentId'] == str(agent_uuid)
     assert 'agent_name' not in agent_node['config']  # Name should be replaced
+    assert 'agent_name' not in agent_node['parameters']  # Name should be replaced
 
 
 def test_wdf_to_api_payload_resolves_kb_refs(workflow_with_kb):
@@ -372,8 +375,10 @@ def test_wdf_to_api_payload_resolves_kb_refs(workflow_with_kb):
     # Find the retrieval node by its UUID
     retrieval_node_uuid = slug_to_uuid['retrieval']
     retrieval_node = next(n for n in payload['nodes'] if n['id'] == str(retrieval_node_uuid))
-    assert retrieval_node['config']['knowledge_base_id'] == str(kb_uuid)
+    # knowledge_base_id should be in parameters as knowledgeBaseId (list, for frontend/runtime)
+    assert str(kb_uuid) in retrieval_node['parameters']['knowledgeBaseId']
     assert 'knowledge_base_name' not in retrieval_node['config']  # Name should be replaced
+    assert 'knowledge_base_name' not in retrieval_node['parameters']  # Name should be replaced
 
 
 def test_wdf_to_api_payload_generates_io_for_nodes(simple_workflow):
@@ -442,3 +447,206 @@ def test_generate_node_layout_single_node():
     layout = generate_node_layout(workflow)
     assert len(layout) == 1
     assert 'only' in layout
+
+
+# --- Build Node Parameters Tests ---
+
+
+class TestBuildNodeParameters:
+    """Test the build_node_parameters function."""
+
+    def test_plain_txt_input_parameters(self):
+        """Test parameters for PLAIN_TXT_INPUT node."""
+        node_def = NodeDefinition(
+            type='plain_txt_input',
+            execution_mode='INPUT',
+            label='User Input',
+            config={'placeholder': 'Enter text'},
+        )
+        slug_to_uuid: dict[str, UUID] = {}
+        params = build_node_parameters(node_def, 'user-input', node_def.config, slug_to_uuid)
+        assert params['type'] == 'plainTextInput'
+        assert params['label'] == 'User Input'
+        assert params['function_name'] == 'user_input'
+        assert params['prompt'] == 'Enter text'
+
+    def test_file_upload_parameters(self):
+        """Test parameters for FILE_UPLOAD node."""
+        node_def = NodeDefinition(
+            type='file_upload',
+            execution_mode='INPUT',
+            label='Upload Doc',
+            config={
+                'acceptedFormats': ['pdf', 'docx'],
+                'maxFileSize': 10,
+                'textExtraction': 'automatic',
+            },
+        )
+        slug_to_uuid: dict[str, UUID] = {}
+        params = build_node_parameters(node_def, 'upload-doc', node_def.config, slug_to_uuid)
+        assert params['type'] == 'fileUpload'
+        assert params['acceptedFormats'] == ['pdf', 'docx']
+        assert params['maxFileSize'] == 10
+        assert params['textExtraction'] == 'automatic'
+        assert params['extractText'] is True
+
+    def test_rag_agent_parameters_with_slug_replacement(self):
+        """Test parameters for RAG_AGENT node replaces slug refs with UUIDs."""
+        input_uuid = UUID('11111111-1111-1111-1111-111111111111')
+        slug_to_uuid = {'text-input': input_uuid}
+        node_config = {
+            'agent_id': str(UUID('22222222-2222-2222-2222-222222222222')),
+            'knowledge_base_ids': ['33333333-3333-3333-3333-333333333333'],
+            'primaryInput': '{{text-input.output.text}}',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='rag_agent',
+            execution_mode='MESSAGES',
+            label='RAG Agent',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'rag-agent', node_config, slug_to_uuid)
+        assert params['type'] == 'ragAgent'
+        assert params['agentId'] == node_config['agent_id']
+        assert params['knowledgeBasesOverride'] == node_config['knowledge_base_ids']
+        # Slug reference should be replaced with UUID
+        assert f'{{{{{str(input_uuid)}' in params['primaryInput']
+
+    def test_llm_call_parameters_with_template(self):
+        """Test parameters for LLM_CALL node preserves template."""
+        slug_to_uuid: dict[str, UUID] = {}
+        node_def = NodeDefinition(
+            type='llm_call',
+            execution_mode='MESSAGES',
+            label='Summarizer',
+            config={
+                'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+                'template': 'Summarize: {{input.output.text}}',
+                'system_prompt': 'You are a summarizer.',
+                'temperature': 0.7,
+                'maxTokens': 1000,
+            },
+        )
+        params = build_node_parameters(node_def, 'summarizer', node_def.config, slug_to_uuid)
+        assert params['type'] == 'llmPrompt'
+        assert params['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert params['systemPrompt'] == 'You are a summarizer.'
+        assert params['temperature'] == 0.7
+        assert params['maxTokens'] == 1000
+
+    def test_agent_parameters(self):
+        """Test parameters for AGENT node."""
+        node_config = {
+            'agent_id': str(UUID('22222222-2222-2222-2222-222222222222')),
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+            'temperature': 0.7,
+            'maxTokens': 2048,
+        }
+        node_def = NodeDefinition.model_construct(
+            type='agent',
+            execution_mode='MESSAGES',
+            label='My Agent',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'my-agent', node_config, {})
+        assert params['type'] == 'agent'
+        assert params['agentId'] == node_config['agent_id']
+        assert params['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert params['system_prompt'] == 'You are helpful.'
+
+    def test_common_fields_always_present(self):
+        """Test that common UI fields are always present."""
+        node_def = NodeDefinition(
+            type='plain_txt_input',
+            execution_mode='INPUT',
+            label='Test',
+            config={},
+        )
+        params = build_node_parameters(node_def, 'test-node', {}, {})
+        assert params['type'] == 'plainTextInput'
+        assert params['label'] == 'Test'
+        assert params['function_name'] == 'test_node'
+        assert params['collapsed'] is False
+        assert params['validationLevel'] == 'ok'
+        assert params['validationMessages'] == []
+
+    def test_label_falls_back_to_slug(self):
+        """Test that label falls back to slug when not set on NodeDefinition."""
+        node_def = NodeDefinition.model_construct(
+            type='plain_txt_input',
+            execution_mode='INPUT',
+            label=None,
+            config={},
+        )
+        params = build_node_parameters(node_def, 'my-input', {}, {})
+        assert params['label'] == 'my-input'
+
+
+class TestWdfToApiPayloadParameters:
+    """Test that wdf_to_api_payload populates parameters correctly."""
+
+    def test_nodes_have_parameters(self, simple_workflow):
+        """Test that nodes in the payload have populated parameters."""
+        org_id = UUID('99999999-9999-9999-9999-999999999999')
+        layout = generate_node_layout(simple_workflow)
+        resolved_deps: dict = {}
+
+        payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+
+        for node in payload['nodes']:
+            # All nodes should have non-empty parameters
+            assert node['parameters'], f'Node {node["config_type"]} has empty parameters'
+            # Parameters should have common fields
+            assert 'type' in node['parameters']
+            assert 'label' in node['parameters']
+            assert 'function_name' in node['parameters']
+
+    def test_nodes_have_function_name(self, simple_workflow):
+        """Test that nodes in the payload have function_name set."""
+        org_id = UUID('99999999-9999-9999-9999-999999999999')
+        layout = generate_node_layout(simple_workflow)
+        resolved_deps: dict = {}
+
+        payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+
+        for node in payload['nodes']:
+            assert node['function_name'] is not None
+            assert isinstance(node['function_name'], str)
+
+    def test_resolve_dependencies_with_kb_names_list(self):
+        """Test resolving knowledge_base_names (list) in config."""
+        from unittest.mock import MagicMock
+
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'rag': NodeDefinition.model_construct(
+                    type='rag_agent',
+                    execution_mode='MESSAGES',
+                    config={
+                        'knowledge_base_names': ['KB One', 'KB Two'],
+                        'agentId': 'some-agent-id',
+                    },
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='rag',
+        )
+        mock_client = MagicMock()
+        mock_client.find_knowledge_base_by_name.side_effect = [
+            {'id': '11111111-1111-1111-1111-111111111111', 'name': 'KB One'},
+            {'id': '22222222-2222-2222-2222-222222222222', 'name': 'KB Two'},
+        ]
+
+        resolved = resolve_dependencies(workflow, mock_client)
+        assert 'kb:KB One' in resolved
+        assert 'kb:KB Two' in resolved
+        assert mock_client.find_knowledge_base_by_name.call_count == 2

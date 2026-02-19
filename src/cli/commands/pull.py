@@ -37,6 +37,22 @@ from cli.wdf_yaml import dump_workflow_yaml
 
 console = Console()
 
+# UUID regex for matching variable references like {{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}
+UUID_REFERENCE_RE = re.compile(
+    r'\{\{([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
+)
+
+# Fields to strip from parameters — frontend-only UI state, not meaningful for WDF
+PARAMETERS_UI_FIELDS = frozenset(
+    {
+        'type',
+        'collapsed',
+        'validationLevel',
+        'validationMessages',
+        'function_name',
+    }
+)
+
 
 class PullError(Exception):
     """Raised when pull operation fails."""
@@ -116,6 +132,204 @@ def generate_slug(
 
 
 # ---------------------------------------------------------------------------
+# Parameters -> WDF config extraction
+# ---------------------------------------------------------------------------
+
+# Per-node-type field mappings: parameters_key -> wdf_config_key
+# Fields are extracted from parameters first, then config as fallback.
+# A value of None means the key name is the same in both.
+_NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
+    'PLAIN_TXT_INPUT': {
+        # parameters.prompt -> config.placeholder (different naming)
+        'prompt': 'placeholder',
+    },
+    'FILE_UPLOAD': {
+        'acceptedFormats': None,
+        'maxFileSize': None,
+        'textExtraction': None,
+        'extractTables': None,
+        'preserveFormatting': None,
+        'extractText': None,
+    },
+    'AGENT': {
+        'agentId': None,
+        'model': None,
+        'system_prompt': None,
+        'temperature': None,
+        'maxTokens': None,
+    },
+    'RAG_AGENT': {
+        'agentId': None,
+        'knowledgeBasesOverride': 'knowledgeBaseIds',
+        'primaryInput': None,
+        'disableRAG': None,
+    },
+    'LLM_CALL': {
+        'model': None,
+        'template': None,
+        'system_prompt': None,
+        'systemPrompt': 'system_prompt',
+        'temperature': None,
+        'maxTokens': None,
+        'topP': None,
+    },
+    'RETRIEVE': {
+        'knowledgeBaseId': None,
+        'topK': None,
+        'searchQuery': None,
+        'scoreThreshold': None,
+    },
+    'STRUCTURED_INPUT': {
+        # schema lives in config, not parameters
+    },
+    'STRUCTURED_OUTPUT': {
+        # schema lives in config, not parameters
+    },
+    'HUMAN_REVIEW': {
+        'review_prompt': None,
+    },
+    'DOCUMENT_EXTRACTION': {
+        'extract_tables': 'extractTables',
+        'extract_images': 'extractImages',
+    },
+}
+
+# Config-only fields (read from node.config when parameters doesn't have them)
+_NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
+    'PLAIN_TXT_INPUT': {
+        'placeholder': None,
+    },
+    'AGENT': {
+        'model': None,
+        'model_name': 'model',
+        'system_prompt': None,
+        'temperature': None,
+        'max_tokens': 'maxTokens',
+        'maxTokens': None,
+        'tools': None,
+        'agent_id': 'agentId',
+    },
+    'STRUCTURED_INPUT': {
+        'schema': None,
+    },
+    'STRUCTURED_OUTPUT': {
+        'schema': None,
+        'model': None,
+    },
+    'RETRIEVE': {
+        'enable_reranking': 'enableReranking',
+        'include_metadata': 'includeMetadata',
+        'knowledge_base_id': 'knowledgeBaseId',
+        'knowledge_base_ids': 'knowledgeBaseId',
+    },
+    'HUMAN_REVIEW': {
+        'review_prompt': None,
+        'allow_approve': 'allowApprove',
+        'allow_reject': 'allowReject',
+        'allow_edit': 'allowEdit',
+    },
+    'DOCUMENT_EXTRACTION': {
+        'fields': None,
+        'extractionMethod': None,
+        'prompt': None,
+    },
+}
+
+
+def extract_node_config(
+    config_type: str,
+    parameters: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Extract WDF config fields from node parameters and config dicts.
+
+    The backend stores node data in two dicts:
+    - ``parameters``: Frontend/UI state + runtime reference IDs
+    - ``config``: Structured runtime configuration
+
+    This function merges them into a single WDF-compatible config dict,
+    using parameters as the primary source and config as fallback.
+
+    Args:
+        config_type: Uppercase config type (e.g., 'RAG_AGENT').
+        parameters: The node's parameters dict from the API.
+        config: The node's config dict from the API.
+
+    Returns:
+        A merged config dict suitable for WDF NodeDefinition.config.
+    """
+    result: dict[str, Any] = {}
+
+    # Step 1: Extract fields from parameters (primary source)
+    param_fields = _NODE_TYPE_PARAM_FIELDS.get(config_type, {})
+    for param_key, wdf_key in param_fields.items():
+        if param_key in parameters:
+            target_key = wdf_key if wdf_key is not None else param_key
+            result[target_key] = parameters[param_key]
+
+    # Step 2: Fill gaps from config (fallback source)
+    config_fields = _NODE_TYPE_CONFIG_FIELDS.get(config_type, {})
+    for config_key, wdf_key in config_fields.items():
+        target_key = wdf_key if wdf_key is not None else config_key
+        # Only fill if not already set from parameters
+        if target_key not in result and config_key in config:
+            result[target_key] = config[config_key]
+
+    # Step 3: If no typed fields matched at all, fall back to merging
+    # config dict directly (for unknown/new node types or CLI-pushed workflows
+    # where everything was in config).
+    if not result and config:
+        # Use config as-is but strip known non-WDF keys
+        result = {k: v for k, v in config.items() if k not in PARAMETERS_UI_FIELDS}
+
+    return result
+
+
+def replace_uuid_references(
+    config: dict[str, Any],
+    uuid_to_slug: dict[UUID, str],
+) -> dict[str, Any]:
+    """Replace UUID variable references in config values with slug-based references.
+
+    Template strings like ``{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}``
+    are replaced with ``{{file-upload-1.output.text}}`` using the uuid_to_slug map.
+
+    Only processes string values in the config dict (not nested dicts/lists).
+
+    Args:
+        config: The node config dict to process.
+        uuid_to_slug: Mapping from node UUIDs to slug strings.
+
+    Returns:
+        A new config dict with UUID references replaced.
+    """
+    result: dict[str, Any] = {}
+    for key, value in config.items():
+        if isinstance(value, str):
+            result[key] = _replace_uuids_in_string(value, uuid_to_slug)
+        else:
+            result[key] = value
+    return result
+
+
+def _replace_uuids_in_string(text: str, uuid_to_slug: dict[UUID, str]) -> str:
+    """Replace all UUID references in a template string with slugs."""
+
+    def _replacer(match: re.Match) -> str:
+        uuid_str = match.group(1)
+        try:
+            node_uuid = UUID(uuid_str)
+            slug = uuid_to_slug.get(node_uuid)
+            if slug:
+                return '{{' + slug
+        except (ValueError, AttributeError):
+            pass
+        return match.group(0)  # Return original if not found
+
+    return UUID_REFERENCE_RE.sub(_replacer, text)
+
+
+# ---------------------------------------------------------------------------
 # Reverse resolution: UUIDs -> names
 # ---------------------------------------------------------------------------
 
@@ -137,12 +351,50 @@ def reverse_resolve_dependencies(
         Tuple of (agent_uuid_to_name, kb_uuid_to_name) dictionaries.
         UUIDs not found in the API are simply omitted from the maps.
     """
-    # Collect all agent and KB UUIDs referenced in node configs
+    # Collect all agent and KB UUIDs referenced in node configs and parameters.
+    # The backend stores references in two places:
+    # - parameters: agentId, knowledgeBasesOverride, knowledgeBaseId (frontend-created)
+    # - config: agent_id, knowledge_base_id, knowledge_base_ids (CLI-pushed)
     agent_uuids: set[UUID] = set()
     kb_uuids: set[UUID] = set()
 
     for node in nodes:
         config = node.config
+        parameters = getattr(node, 'parameters', {}) or {}
+
+        # --- Scan parameters (primary source, frontend-created workflows) ---
+
+        # agentId in parameters (AGENT and RAG_AGENT nodes)
+        if 'agentId' in parameters:
+            try:
+                agent_uuids.add(UUID(parameters['agentId']))
+            except (ValueError, TypeError):
+                pass
+
+        # knowledgeBasesOverride in parameters (RAG_AGENT nodes — list of UUIDs)
+        if 'knowledgeBasesOverride' in parameters:
+            for kb_id in parameters.get('knowledgeBasesOverride', []):
+                try:
+                    kb_uuids.add(UUID(kb_id))
+                except (ValueError, TypeError):
+                    pass
+
+        # knowledgeBaseId in parameters (RETRIEVE nodes — list of UUIDs)
+        if 'knowledgeBaseId' in parameters:
+            kb_val = parameters['knowledgeBaseId']
+            if isinstance(kb_val, list):
+                for kb_id in kb_val:
+                    try:
+                        kb_uuids.add(UUID(kb_id))
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                try:
+                    kb_uuids.add(UUID(kb_val))
+                except (ValueError, TypeError):
+                    pass
+
+        # --- Scan config (fallback, CLI-pushed workflows) ---
 
         # agent_id field (AGENT nodes)
         if 'agent_id' in config:
@@ -236,7 +488,7 @@ def api_response_to_wdf(
         node_uuid = UUID(str(node.id))
         fn_name = getattr(node, 'function_name', None)
         config_type = (
-            node.config_type if isinstance(node.config_type, str) else str(node.config_type)
+            node.config_type.value if hasattr(node.config_type, 'value') else str(node.config_type)
         )
 
         slug = generate_slug(fn_name, config_type, existing_slugs)
@@ -251,18 +503,36 @@ def api_response_to_wdf(
         node_uuid = UUID(str(node.id))
         slug = uuid_to_slug[node_uuid]
         config_type = (
-            node.config_type if isinstance(node.config_type, str) else str(node.config_type)
+            node.config_type.value if hasattr(node.config_type, 'value') else str(node.config_type)
         )
         execution_mode = (
-            node.execution_mode
-            if isinstance(node.execution_mode, str)
+            node.execution_mode.value
+            if hasattr(node.execution_mode, 'value')
             else str(node.execution_mode)
         )
 
-        # Clone and transform config
-        config = dict(node.config)
+        # Extract WDF config from parameters (primary) + config (fallback)
+        parameters = getattr(node, 'parameters', {}) or {}
+        raw_config = getattr(node, 'config', {}) or {}
+        config = extract_node_config(config_type, parameters, raw_config)
 
-        # Replace agent_id with agent_name
+        # Replace UUID variable references in template strings
+        # (e.g., {{4a8611ec-...output.text}} -> {{file-upload-1.output.text}})
+        config = replace_uuid_references(config, uuid_to_slug)
+
+        # --- Reverse-resolve agent/KB UUIDs to human-readable names ---
+
+        # Replace agentId UUID with agent_name
+        if 'agentId' in config:
+            try:
+                agent_uuid = UUID(config['agentId'])
+                if agent_uuid in agent_map:
+                    config['agent_name'] = agent_map[agent_uuid]
+                    del config['agentId']
+            except (ValueError, TypeError):
+                pass
+
+        # Replace agent_id (snake_case, from CLI-pushed config) with agent_name
         if 'agent_id' in config:
             try:
                 agent_uuid = UUID(config['agent_id'])
@@ -272,7 +542,54 @@ def api_response_to_wdf(
             except (ValueError, TypeError):
                 pass
 
-        # Replace knowledge_base_id with knowledge_base_name
+        # Replace knowledgeBaseIds with knowledge_base_names (list)
+        if 'knowledgeBaseIds' in config:
+            resolved_names = []
+            unresolved_ids = []
+            for kb_id_str in config['knowledgeBaseIds']:
+                try:
+                    kb_uuid_val = UUID(kb_id_str)
+                    if kb_uuid_val in kb_map:
+                        resolved_names.append(kb_map[kb_uuid_val])
+                    else:
+                        unresolved_ids.append(kb_id_str)
+                except (ValueError, TypeError):
+                    unresolved_ids.append(kb_id_str)
+
+            if resolved_names and not unresolved_ids:
+                config['knowledge_base_names'] = resolved_names
+                del config['knowledgeBaseIds']
+            # If some are unresolved, keep the original list
+
+        # Replace knowledgeBaseId (singular or list, for RETRIEVE) with knowledge_base_name
+        if 'knowledgeBaseId' in config:
+            kb_val = config['knowledgeBaseId']
+            if isinstance(kb_val, list):
+                # RETRIEVE nodes store knowledgeBaseId as a list
+                resolved_names = []
+                unresolved_ids = []
+                for kb_id_str in kb_val:
+                    try:
+                        kb_uuid_val = UUID(kb_id_str)
+                        if kb_uuid_val in kb_map:
+                            resolved_names.append(kb_map[kb_uuid_val])
+                        else:
+                            unresolved_ids.append(kb_id_str)
+                    except (ValueError, TypeError):
+                        unresolved_ids.append(kb_id_str)
+                if resolved_names and not unresolved_ids:
+                    config['knowledge_base_names'] = resolved_names
+                    del config['knowledgeBaseId']
+            else:
+                try:
+                    kb_uuid_val = UUID(kb_val)
+                    if kb_uuid_val in kb_map:
+                        config['knowledge_base_name'] = kb_map[kb_uuid_val]
+                        del config['knowledgeBaseId']
+                except (ValueError, TypeError):
+                    pass
+
+        # Replace knowledge_base_id (snake_case, from CLI-pushed config) with knowledge_base_name
         if 'knowledge_base_id' in config:
             try:
                 kb_uuid_val = UUID(config['knowledge_base_id'])
@@ -282,7 +599,7 @@ def api_response_to_wdf(
             except (ValueError, TypeError):
                 pass
 
-        # Replace knowledge_base_ids with knowledge_base_names (list)
+        # Replace knowledge_base_ids (snake_case list, from CLI-pushed config)
         if 'knowledge_base_ids' in config:
             resolved_names = []
             unresolved_ids = []
@@ -299,14 +616,16 @@ def api_response_to_wdf(
             if resolved_names and not unresolved_ids:
                 config['knowledge_base_names'] = resolved_names
                 del config['knowledge_base_ids']
-            # If some are unresolved, keep the original list
+
+        # --- Extract label from parameters ---
+        label = parameters.get('label') if parameters else None
 
         # Build NodeDefinition — use model_construct to bypass validation
         # since agent_name / knowledge_base_name are CLI-only fields
         node_def = NodeDefinition.model_construct(
             type=config_type.lower(),
             execution_mode=execution_mode,
-            label=None,
+            label=label,
             config=config,
         )
         wdf_nodes[slug] = node_def
@@ -326,7 +645,9 @@ def api_response_to_wdf(
             # Skip edges referencing unknown nodes
             continue
 
-        edge_type = edge.edge_type if isinstance(edge.edge_type, str) else str(edge.edge_type)
+        edge_type = (
+            edge.edge_type.value if hasattr(edge.edge_type, 'value') else str(edge.edge_type)
+        )
         condition = getattr(edge, 'condition_function', None)
 
         edge_def = EdgeDefinition.model_validate(

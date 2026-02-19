@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from uuid import UUID, uuid4
 
 from rich.console import Console
 from workflow_models.wdf import WorkflowDefinition
+from workflow_models.wdf.nodes import NodeDefinition
 
 from cli.client import WorkflowClient
 from cli.config import CLIConfig
@@ -33,6 +35,23 @@ from cli.validation.runner import run_all_validations
 from cli.wdf_yaml import load_workflow_yaml
 
 console = Console()
+
+# Regex for matching slug-based variable references like {{file-upload-1.output.text}}
+_SLUG_REFERENCE_RE = re.compile(r'\{\{([a-z0-9][a-z0-9-]*)')
+
+# Maps WDF node type to the ``type`` field value expected in backend parameters
+_WDF_TYPE_TO_PARAMS_TYPE: dict[str, str] = {
+    'plain_txt_input': 'plainTextInput',
+    'structured_input': 'formInput',
+    'file_upload': 'fileUpload',
+    'agent': 'agent',
+    'rag_agent': 'ragAgent',
+    'llm_call': 'llmPrompt',
+    'structured_output': 'structuredOutput',
+    'retrieve': 'retrieve',
+    'document_extraction': 'documentExtraction',
+    'human_review': 'humanReview',
+}
 
 
 class PushError(Exception):
@@ -89,6 +108,18 @@ def resolve_dependencies(workflow: WorkflowDefinition, client: WorkflowClient) -
                     raise DependencyResolutionError(f'Knowledge base not found: {kb_name}')
                 resolved[key] = UUID(result['id'])
 
+        # Check for knowledge_base_names (list) in config
+        if 'knowledge_base_names' in config:
+            for kb_name in config['knowledge_base_names']:
+                if not isinstance(kb_name, str):
+                    continue
+                key = f'kb:{kb_name}'
+                if key not in resolved:
+                    result = client.find_knowledge_base_by_name(kb_name)
+                    if result is None:
+                        raise DependencyResolutionError(f'Knowledge base not found: {kb_name}')
+                    resolved[key] = UUID(result['id'])
+
     return resolved
 
 
@@ -115,6 +146,155 @@ def generate_node_layout(workflow: WorkflowDefinition) -> dict[str, tuple[int, i
         layout[slug] = (200, y_offset + idx * y_spacing)
 
     return layout
+
+
+def _replace_slugs_with_uuids(
+    text: str,
+    slug_to_uuid: dict[str, UUID],
+) -> str:
+    """Replace slug-based variable references with UUID-based references.
+
+    Converts ``{{file-upload-1.output.text}}`` to
+    ``{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}``.
+
+    Args:
+        text: Template string with slug references.
+        slug_to_uuid: Mapping from slugs to UUIDs.
+
+    Returns:
+        String with slug references replaced by UUID references.
+    """
+
+    def _replacer(match: re.Match) -> str:
+        slug = match.group(1)
+        node_uuid = slug_to_uuid.get(slug)
+        if node_uuid:
+            return '{{' + str(node_uuid)
+        return match.group(0)
+
+    return _SLUG_REFERENCE_RE.sub(_replacer, text)
+
+
+def build_node_parameters(
+    node_def: NodeDefinition,
+    node_slug: str,
+    node_config: dict[str, Any],
+    slug_to_uuid: dict[str, UUID],
+) -> dict[str, Any]:
+    """Build the backend ``parameters`` dict from WDF node config.
+
+    The backend frontend expects node data in ``parameters`` with specific
+    camelCase field names and UI metadata (type, label, function_name, etc.).
+
+    This is the inverse of ``extract_node_config()`` in the pull command.
+
+    Args:
+        node_def: The WDF NodeDefinition.
+        node_slug: The node's slug key.
+        node_config: The already-resolved config dict (agent_name -> agent_id, etc.).
+        slug_to_uuid: Mapping from node slugs to UUIDs for variable reference replacement.
+
+    Returns:
+        A parameters dict ready for the backend API.
+    """
+    node_type = node_def.type
+    params: dict[str, Any] = {}
+
+    # Common fields
+    params_type = _WDF_TYPE_TO_PARAMS_TYPE.get(node_type, node_type)
+    params['type'] = params_type
+    params['label'] = node_def.label or node_slug
+    params['function_name'] = node_slug.replace('-', '_')
+    params['collapsed'] = False
+    params['validationLevel'] = 'ok'
+    params['validationMessages'] = []
+
+    # Node-type-specific fields from config -> parameters
+    if node_type == 'plain_txt_input':
+        if 'placeholder' in node_config:
+            params['prompt'] = node_config['placeholder']
+            params['text'] = ''
+
+    elif node_type == 'file_upload':
+        for key in (
+            'acceptedFormats',
+            'maxFileSize',
+            'textExtraction',
+            'extractTables',
+            'preserveFormatting',
+        ):
+            if key in node_config:
+                params[key] = node_config[key]
+        if 'textExtraction' in node_config:
+            params['extractText'] = True
+
+    elif node_type == 'agent':
+        # agentId goes in parameters (already resolved from agent_name)
+        if 'agent_id' in node_config:
+            params['agentId'] = node_config['agent_id']
+        for key in ('model', 'system_prompt', 'temperature', 'maxTokens'):
+            if key in node_config:
+                params[key] = node_config[key]
+
+    elif node_type == 'rag_agent':
+        if 'agent_id' in node_config:
+            params['agentId'] = node_config['agent_id']
+        # knowledge_base_ids -> knowledgeBasesOverride
+        if 'knowledge_base_ids' in node_config:
+            params['knowledgeBasesOverride'] = node_config['knowledge_base_ids']
+        elif 'knowledge_base_id' in node_config:
+            params['knowledgeBasesOverride'] = [node_config['knowledge_base_id']]
+        if 'primaryInput' in node_config:
+            # Replace slug references with UUID references
+            params['primaryInput'] = _replace_slugs_with_uuids(
+                node_config['primaryInput'], slug_to_uuid
+            )
+        if 'disableRAG' in node_config:
+            params['disableRAG'] = node_config['disableRAG']
+        else:
+            params['disableRAG'] = False
+
+    elif node_type == 'llm_call':
+        for key in ('model', 'temperature', 'maxTokens', 'topP'):
+            if key in node_config:
+                params[key] = node_config[key]
+        if 'system_prompt' in node_config:
+            params['systemPrompt'] = node_config['system_prompt']
+        if 'template' in node_config:
+            # Replace slug references with UUID references
+            params['template'] = _replace_slugs_with_uuids(node_config['template'], slug_to_uuid)
+        params['variables'] = []
+
+    elif node_type == 'retrieve':
+        # knowledge_base_id -> knowledgeBaseId (as list)
+        if 'knowledge_base_id' in node_config:
+            params['knowledgeBaseId'] = [node_config['knowledge_base_id']]
+        elif 'knowledgeBaseId' in node_config:
+            kb_val = node_config['knowledgeBaseId']
+            params['knowledgeBaseId'] = kb_val if isinstance(kb_val, list) else [kb_val]
+        for key in ('topK', 'searchQuery', 'scoreThreshold'):
+            if key in node_config:
+                params[key] = node_config[key]
+
+    elif node_type == 'human_review':
+        if 'review_prompt' in node_config:
+            params['review_prompt'] = node_config['review_prompt']
+
+    elif node_type == 'document_extraction':
+        if 'extractTables' in node_config:
+            params['extract_tables'] = node_config['extractTables']
+        if 'extractImages' in node_config:
+            params['extract_images'] = node_config['extractImages']
+
+    elif node_type == 'structured_output':
+        # schema stays in config, not parameters
+        pass
+
+    elif node_type == 'structured_input':
+        # schema stays in config, not parameters
+        pass
+
+    return params
 
 
 def wdf_to_api_payload(
@@ -206,17 +386,75 @@ def wdf_to_api_payload(
             if kb_key in resolved_deps:
                 node_config['knowledge_base_id'] = str(resolved_deps[kb_key])
 
+        # Replace knowledge_base_names (list) with knowledge_base_ids
+        if 'knowledge_base_names' in node_config:
+            kb_names = node_config.pop('knowledge_base_names')
+            kb_ids = []
+            for kb_name in kb_names:
+                kb_key = f'kb:{kb_name}'
+                if kb_key in resolved_deps:
+                    kb_ids.append(str(resolved_deps[kb_key]))
+            if kb_ids:
+                node_config['knowledge_base_ids'] = kb_ids
+
+        # Build parameters dict for the backend frontend
+        node_parameters = build_node_parameters(
+            node_def,
+            node_slug,
+            node_config,
+            slug_to_uuid,
+        )
+
+        # Build the config dict for backend runtime
+        # Remove fields that belong exclusively in parameters, not config
+        runtime_config = {}
+        if node_def.type in ('agent',):
+            # Agent nodes: config holds model_name, system_prompt, etc.
+            if 'model' in node_config:
+                runtime_config['model_name'] = node_config['model']
+            if 'system_prompt' in node_config:
+                runtime_config['system_prompt'] = node_config['system_prompt']
+            if 'temperature' in node_config:
+                runtime_config['temperature'] = node_config['temperature']
+            if 'maxTokens' in node_config:
+                runtime_config['max_tokens'] = node_config['maxTokens']
+            if 'tools' in node_config:
+                runtime_config['tools'] = node_config['tools']
+        elif node_def.type in ('structured_input', 'structured_output'):
+            # Schema-based nodes keep schema in config
+            if 'schema' in node_config:
+                runtime_config['schema'] = node_config['schema']
+            if 'model' in node_config:
+                runtime_config['model'] = node_config['model']
+        elif node_def.type == 'retrieve':
+            # Retrieve: config holds enable_reranking, include_metadata, etc.
+            if 'enableReranking' in node_config:
+                runtime_config['enable_reranking'] = node_config['enableReranking']
+            if 'includeMetadata' in node_config:
+                runtime_config['include_metadata'] = node_config['includeMetadata']
+        elif node_def.type == 'human_review':
+            if 'review_prompt' in node_config:
+                runtime_config['review_prompt'] = node_config['review_prompt']
+            if 'allowApprove' in node_config:
+                runtime_config['allow_approve'] = node_config['allowApprove']
+            if 'allowReject' in node_config:
+                runtime_config['allow_reject'] = node_config['allowReject']
+            if 'allowEdit' in node_config:
+                runtime_config['allow_edit'] = node_config['allowEdit']
+        # For other node types (file_upload, llm_call, rag_agent, etc.)
+        # all data goes in parameters, config stays empty
+
         # Build node payload with correct schema
         node_payload = {
             'id': str(node_uuid),
             'workflow_version': workflow.version,
             'config_type': node_def.type.upper(),  # Backend expects UPPERCASE enum values
             'execution_mode': node_def.execution_mode.upper(),  # Ensure uppercase
-            'function_name': None,
-            'parameters': {},
+            'function_name': node_slug.replace('-', '_'),
+            'parameters': node_parameters,
             'retry_policy': {'max_retries': 3},
             'timeout_seconds': 30,
-            'config': node_config,
+            'config': runtime_config,
             'delegated_response': False,
             'step_type': 'STEP',
             'join_config': {},

@@ -22,7 +22,9 @@ from typer.testing import CliRunner
 
 from cli.commands.pull import (
     api_response_to_wdf,
+    extract_node_config,
     generate_slug,
+    replace_uuid_references,
     reverse_resolve_dependencies,
     slugify,
 )
@@ -1166,3 +1168,591 @@ class TestPullErrorHandling:
         """Test pull with missing configuration shows clear error."""
         result = runner.invoke(app, ['pull', str(uuid4())])
         assert result.exit_code != 0
+
+
+# ============================================================================
+# Extract Node Config Tests
+# ============================================================================
+
+
+class TestExtractNodeConfig:
+    """Test the extract_node_config function that merges parameters + config."""
+
+    def test_plain_txt_input_from_parameters(self):
+        """Test extracting PLAIN_TXT_INPUT config from parameters."""
+        parameters = {
+            'type': 'plainTextInput',
+            'label': 'question',
+            'prompt': 'Enter your question',
+            'function_name': 'plainTextInput_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('PLAIN_TXT_INPUT', parameters, config)
+        assert result == {'placeholder': 'Enter your question'}
+
+    def test_plain_txt_input_from_config_fallback(self):
+        """Test extracting PLAIN_TXT_INPUT config from config (CLI-pushed)."""
+        parameters: dict = {}
+        config = {'placeholder': 'Enter text here'}
+        result = extract_node_config('PLAIN_TXT_INPUT', parameters, config)
+        assert result == {'placeholder': 'Enter text here'}
+
+    def test_file_upload_from_parameters(self):
+        """Test extracting FILE_UPLOAD config from parameters."""
+        parameters = {
+            'type': 'fileUpload',
+            'label': 'File Upload 1',
+            'acceptedFormats': ['pdf', 'docx', 'txt'],
+            'maxFileSize': 10,
+            'extractText': True,
+            'textExtraction': 'automatic',
+            'function_name': 'fileUpload_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('FILE_UPLOAD', parameters, config)
+        assert result['acceptedFormats'] == ['pdf', 'docx', 'txt']
+        assert result['maxFileSize'] == 10
+        assert result['textExtraction'] == 'automatic'
+        assert result['extractText'] is True
+        # UI-only fields should not be in result
+        assert 'type' not in result
+        assert 'collapsed' not in result
+        assert 'function_name' not in result
+        assert 'label' not in result
+
+    def test_rag_agent_from_parameters(self):
+        """Test extracting RAG_AGENT config from parameters."""
+        agent_id = str(uuid4())
+        kb_id = str(uuid4())
+        parameters = {
+            'type': 'ragAgent',
+            'label': 'RAG Agent 1',
+            'agentId': agent_id,
+            'primaryInput': '{{plainTextInput_1.output.text}}',
+            'knowledgeBasesOverride': [kb_id],
+            'disableRAG': False,
+            'function_name': 'ragAgent_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('RAG_AGENT', parameters, config)
+        assert result['agentId'] == agent_id
+        assert result['knowledgeBaseIds'] == [kb_id]  # knowledgeBasesOverride -> knowledgeBaseIds
+        assert result['primaryInput'] == '{{plainTextInput_1.output.text}}'
+        assert result['disableRAG'] is False
+
+    def test_llm_call_from_parameters(self):
+        """Test extracting LLM_CALL config from parameters."""
+        parameters = {
+            'type': 'llmPrompt',
+            'label': 'Summarizer',
+            'template': 'Summarize: {{fileUpload_1.output.text}}',
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'temperature': 0.7,
+            'maxTokens': 1000,
+            'function_name': 'llmPrompt_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('LLM_CALL', parameters, config)
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert result['template'] == 'Summarize: {{fileUpload_1.output.text}}'
+        assert result['temperature'] == 0.7
+        assert result['maxTokens'] == 1000
+
+    def test_agent_from_parameters(self):
+        """Test extracting AGENT config from parameters."""
+        agent_id = str(uuid4())
+        parameters = {
+            'type': 'agent',
+            'label': 'My Agent',
+            'agentId': agent_id,
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are a helpful assistant.',
+            'temperature': 0.7,
+            'maxTokens': 2048,
+            'function_name': 'agent_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('AGENT', parameters, config)
+        assert result['agentId'] == agent_id
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert result['system_prompt'] == 'You are a helpful assistant.'
+        assert result['temperature'] == 0.7
+        assert result['maxTokens'] == 2048
+
+    def test_agent_from_config_fallback(self):
+        """Test extracting AGENT config from config (CLI-pushed)."""
+        parameters: dict = {}
+        config = {
+            'agent_id': str(uuid4()),
+            'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            'system_prompt': 'You are an invoice agent.',
+            'temperature': 0.7,
+        }
+        result = extract_node_config('AGENT', parameters, config)
+        assert result['model'] == 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+        assert result['system_prompt'] == 'You are an invoice agent.'
+        assert result['temperature'] == 0.7
+        # agent_id -> agentId renaming via config fallback
+        assert result['agentId'] == config['agent_id']
+
+    def test_agent_from_config_model_name_fallback(self):
+        """Test that model_name in config maps to model in WDF."""
+        parameters: dict = {}
+        config = {
+            'model_name': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+            'max_tokens': 2048,
+        }
+        result = extract_node_config('AGENT', parameters, config)
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert result['maxTokens'] == 2048
+
+    def test_structured_input_from_config(self):
+        """Test extracting STRUCTURED_INPUT config from config."""
+        parameters = {'type': 'formInput', 'label': 'Instructions'}
+        config = {'schema': {'type': 'object', 'properties': {'topic': {'type': 'string'}}}}
+        result = extract_node_config('STRUCTURED_INPUT', parameters, config)
+        assert result['schema'] == config['schema']
+
+    def test_structured_output_from_config(self):
+        """Test extracting STRUCTURED_OUTPUT config from config."""
+        parameters: dict = {}
+        config = {'schema': {'type': 'object', 'properties': {}}}
+        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
+        assert result['schema'] == config['schema']
+
+    def test_retrieve_from_parameters(self):
+        """Test extracting RETRIEVE config from parameters."""
+        kb_id = str(uuid4())
+        parameters = {
+            'type': 'retrieve',
+            'label': 'VectorSearch',
+            'knowledgeBaseId': [kb_id],
+            'topK': 5,
+            'function_name': 'retrieve_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('RETRIEVE', parameters, config)
+        assert result['knowledgeBaseId'] == [kb_id]
+        assert result['topK'] == 5
+
+    def test_human_review_from_parameters(self):
+        """Test extracting HUMAN_REVIEW config from parameters."""
+        parameters = {
+            'type': 'humanReview',
+            'label': 'QualityReview',
+            'review_prompt': 'Please review the response.',
+            'function_name': 'humanReview_1',
+            'collapsed': False,
+        }
+        config = {'allow_approve': True, 'allow_reject': True, 'allow_edit': False}
+        result = extract_node_config('HUMAN_REVIEW', parameters, config)
+        assert result['review_prompt'] == 'Please review the response.'
+        assert result['allowApprove'] is True
+        assert result['allowReject'] is True
+        assert result['allowEdit'] is False
+
+    def test_document_extraction_from_parameters(self):
+        """Test extracting DOCUMENT_EXTRACTION config from parameters."""
+        parameters = {
+            'type': 'documentExtraction',
+            'label': 'Extractor',
+            'extract_tables': True,
+            'extract_images': False,
+            'function_name': 'docExtract_1',
+            'collapsed': False,
+        }
+        config: dict = {}
+        result = extract_node_config('DOCUMENT_EXTRACTION', parameters, config)
+        assert result['extractTables'] is True
+        assert result['extractImages'] is False
+
+    def test_parameters_primary_over_config(self):
+        """Test that parameters values take priority over config values."""
+        parameters = {'model': 'params-model', 'temperature': 0.9}
+        config = {'model': 'config-model', 'temperature': 0.5, 'system_prompt': 'from config'}
+        result = extract_node_config('AGENT', parameters, config)
+        # parameters should win
+        assert result['model'] == 'params-model'
+        assert result['temperature'] == 0.9
+        # config should fill gaps
+        assert result['system_prompt'] == 'from config'
+
+    def test_unknown_node_type_falls_back_to_config(self):
+        """Test that unknown node types use raw config as fallback."""
+        parameters: dict = {}
+        config = {'custom_field': 'value', 'another': 42}
+        result = extract_node_config('UNKNOWN_TYPE', parameters, config)
+        assert result == {'custom_field': 'value', 'another': 42}
+
+    def test_empty_parameters_and_config(self):
+        """Test with both parameters and config empty."""
+        result = extract_node_config('PLAIN_TXT_INPUT', {}, {})
+        assert result == {}
+
+
+# ============================================================================
+# Replace UUID References Tests
+# ============================================================================
+
+
+class TestReplaceUuidReferences:
+    """Test the replace_uuid_references function."""
+
+    def test_replaces_single_uuid(self):
+        """Test replacing a single UUID reference in a string."""
+        node_uuid = UUID('4a8611ec-ee1e-4d4d-a66e-76ae207d34ee')
+        uuid_to_slug = {node_uuid: 'file-upload-1'}
+        config = {'primaryInput': '{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}'}
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result['primaryInput'] == '{{file-upload-1.output.text}}'
+
+    def test_replaces_multiple_uuids(self):
+        """Test replacing multiple UUID references in a single string."""
+        uuid1 = UUID('11111111-1111-1111-1111-111111111111')
+        uuid2 = UUID('22222222-2222-2222-2222-222222222222')
+        uuid_to_slug = {uuid1: 'text-input', uuid2: 'file-upload'}
+        config = {
+            'template': (
+                '{{11111111-1111-1111-1111-111111111111.output.text}} '
+                'and {{22222222-2222-2222-2222-222222222222.output.text}}'
+            )
+        }
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result['template'] == '{{text-input.output.text}} and {{file-upload.output.text}}'
+
+    def test_preserves_slug_based_references(self):
+        """Test that slug-based references are not mangled."""
+        uuid_to_slug: dict[UUID, str] = {}
+        config = {'template': '{{plainTextInput_1.output.text}}'}
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result['template'] == '{{plainTextInput_1.output.text}}'
+
+    def test_preserves_non_string_values(self):
+        """Test that non-string values are not modified."""
+        uuid_to_slug: dict[UUID, str] = {}
+        config = {
+            'maxTokens': 1000,
+            'temperature': 0.7,
+            'acceptedFormats': ['pdf', 'txt'],
+        }
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result == config
+
+    def test_unknown_uuid_not_replaced(self):
+        """Test that unrecognized UUIDs are kept as-is."""
+        uuid_to_slug: dict[UUID, str] = {}
+        config = {'template': '{{99999999-9999-9999-9999-999999999999.output.text}}'}
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result['template'] == '{{99999999-9999-9999-9999-999999999999.output.text}}'
+
+    def test_mixed_uuid_and_slug_references(self):
+        """Test string with both UUID and slug-based references."""
+        uuid1 = UUID('4a8611ec-ee1e-4d4d-a66e-76ae207d34ee')
+        uuid_to_slug = {uuid1: 'file-upload-1'}
+        config = {
+            'primaryInput': (
+                '{{plainTextInput_1.output.text}} also '
+                '{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}'
+            )
+        }
+        result = replace_uuid_references(config, uuid_to_slug)
+        assert result['primaryInput'] == (
+            '{{plainTextInput_1.output.text}} also {{file-upload-1.output.text}}'
+        )
+
+
+# ============================================================================
+# Reverse Resolve Dependencies — Parameters Tests
+# ============================================================================
+
+
+class TestReverseResolveDependenciesFromParameters:
+    """Test that reverse_resolve_dependencies scans parameters in addition to config."""
+
+    def test_resolves_agent_id_from_parameters(self, mock_agents, mock_knowledge_bases):
+        """Test resolving agentId in parameters dict."""
+        nodes = [
+            SimpleNamespace(
+                config_type='RAG_AGENT',
+                config={},
+                parameters={
+                    'agentId': str(AGENT_UUID),
+                    'knowledgeBasesOverride': [],
+                },
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = mock_knowledge_bases
+
+        agent_map, kb_map = reverse_resolve_dependencies(nodes, mock_client)
+        assert AGENT_UUID in agent_map
+        assert agent_map[AGENT_UUID] == 'Invoice Processing Agent'
+
+    def test_resolves_knowledge_bases_override_from_parameters(
+        self, mock_agents, mock_knowledge_bases
+    ):
+        """Test resolving knowledgeBasesOverride list in parameters dict."""
+        nodes = [
+            SimpleNamespace(
+                config_type='RAG_AGENT',
+                config={},
+                parameters={
+                    'agentId': str(AGENT_UUID),
+                    'knowledgeBasesOverride': [str(KB_UUID)],
+                },
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = mock_knowledge_bases
+
+        agent_map, kb_map = reverse_resolve_dependencies(nodes, mock_client)
+        assert KB_UUID in kb_map
+        assert kb_map[KB_UUID] == 'Invoice Docs KB'
+
+    def test_resolves_knowledge_base_id_list_from_parameters(
+        self, mock_agents, mock_knowledge_bases
+    ):
+        """Test resolving knowledgeBaseId (as list) in parameters for RETRIEVE nodes."""
+        nodes = [
+            SimpleNamespace(
+                config_type='RETRIEVE',
+                config={},
+                parameters={
+                    'knowledgeBaseId': [str(KB_UUID)],
+                },
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = mock_knowledge_bases
+
+        _, kb_map = reverse_resolve_dependencies(nodes, mock_client)
+        assert KB_UUID in kb_map
+        assert kb_map[KB_UUID] == 'Invoice Docs KB'
+
+    def test_merges_config_and_parameters_uuids(self, mock_agents, mock_knowledge_bases):
+        """Test that UUIDs from both config and parameters are resolved."""
+        other_agent = UUID('99999999-9999-9999-9999-999999999999')
+        nodes = [
+            SimpleNamespace(
+                config_type='AGENT',
+                config={'agent_id': str(AGENT_UUID)},
+                parameters={'agentId': str(other_agent)},
+            ),
+        ]
+        mock_agents_list = [
+            {'id': str(AGENT_UUID), 'name': 'Agent A'},
+            {'id': str(other_agent), 'name': 'Agent B'},
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents_list
+        mock_client.list_knowledge_bases.return_value = []
+
+        agent_map, _ = reverse_resolve_dependencies(nodes, mock_client)
+        assert AGENT_UUID in agent_map
+        assert other_agent in agent_map
+
+
+# ============================================================================
+# Full Pipeline Test — Frontend-Created Workflow (Parameters-Based)
+# ============================================================================
+
+
+class TestApiResponseToWdfWithParameters:
+    """Test api_response_to_wdf with frontend-created workflows (data in parameters)."""
+
+    def test_rag_agent_full_extraction(self):
+        """Test pulling a RAG_AGENT workflow with all data in parameters.
+
+        This matches the real API response structure from the user's bug report.
+        """
+        agent_uuid = UUID('e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0')
+        kb_uuid = UUID('6c26048d-2f9c-4177-a126-f2ed8cd02a0e')
+        input_uuid = UUID('ffa92e9b-092a-457e-b7e4-2574ba2ce620')
+        file_uuid = UUID('4a8611ec-ee1e-4d4d-a66e-76ae207d34ee')
+        rag_uuid = UUID('c9043510-f633-4215-bdd1-15509d107383')
+
+        workflow = SimpleNamespace(
+            id=WORKFLOW_ID,
+            version=1,
+            entry_point=input_uuid,
+            exit_point=rag_uuid,
+            state_schema={},
+            organization_id=ORG_ID,
+        )
+        metadata = SimpleNamespace(
+            name='Test Ab2',
+            description='',
+            tags=[],
+        )
+        nodes = [
+            SimpleNamespace(
+                id=input_uuid,
+                config_type='PLAIN_TXT_INPUT',
+                execution_mode='INPUT',
+                function_name='plainTextInput_1',
+                parameters={
+                    'type': 'plainTextInput',
+                    'label': 'question',
+                    'text': '',
+                    'function_name': 'plainTextInput_1',
+                    'collapsed': False,
+                },
+                config={},
+            ),
+            SimpleNamespace(
+                id=file_uuid,
+                config_type='FILE_UPLOAD',
+                execution_mode='INPUT',
+                function_name='fileUpload_1',
+                parameters={
+                    'type': 'fileUpload',
+                    'label': 'File Upload 1',
+                    'acceptedFormats': ['pdf', 'docx', 'txt'],
+                    'maxFileSize': 10,
+                    'extractText': True,
+                    'textExtraction': 'automatic',
+                    'function_name': 'fileUpload_1',
+                    'collapsed': False,
+                },
+                config={},
+            ),
+            SimpleNamespace(
+                id=rag_uuid,
+                config_type='RAG_AGENT',
+                execution_mode='MESSAGES',
+                function_name='ragAgent_1',
+                parameters={
+                    'type': 'ragAgent',
+                    'label': 'RAG Agent 1',
+                    'agentId': str(agent_uuid),
+                    'primaryInput': (
+                        '{{plainTextInput_1.output.text}} also provide a sumary '
+                        f'of the document  {{{{{str(file_uuid)}.output.text}}}}'
+                    ),
+                    'knowledgeBasesOverride': [str(kb_uuid)],
+                    'disableRAG': False,
+                    'function_name': 'ragAgent_1',
+                    'collapsed': False,
+                },
+                config={},
+            ),
+        ]
+        edges = [
+            SimpleNamespace(
+                id=uuid4(),
+                edge_type='STATIC',
+                condition_function=None,
+                source_node_id=input_uuid,
+                target_node_id=rag_uuid,
+            ),
+            SimpleNamespace(
+                id=uuid4(),
+                edge_type='STATIC',
+                condition_function=None,
+                source_node_id=file_uuid,
+                target_node_id=input_uuid,
+            ),
+        ]
+
+        agent_map = {agent_uuid: 'My RAG Agent'}
+        kb_map = {kb_uuid: 'Invoice Knowledge Base'}
+
+        wdf, slug_to_uuid, edge_to_id = api_response_to_wdf(
+            workflow,
+            metadata,
+            nodes,
+            edges,
+            agent_map,
+            kb_map,
+        )
+
+        # --- Verify workflow structure ---
+        assert wdf.name == 'Test Ab2'
+        assert len(wdf.nodes) == 3
+        assert len(wdf.edges) == 2
+
+        # --- Verify PLAIN_TXT_INPUT node ---
+        input_node = wdf.nodes['plaintextinput-1']
+        assert input_node.type == 'plain_txt_input'
+        assert input_node.execution_mode == 'INPUT'
+        assert input_node.label == 'question'
+
+        # --- Verify FILE_UPLOAD node ---
+        file_node = wdf.nodes['fileupload-1']
+        assert file_node.type == 'file_upload'
+        assert file_node.execution_mode == 'INPUT'
+        assert file_node.label == 'File Upload 1'
+        assert file_node.config['acceptedFormats'] == ['pdf', 'docx', 'txt']
+        assert file_node.config['maxFileSize'] == 10
+        assert file_node.config['textExtraction'] == 'automatic'
+
+        # --- Verify RAG_AGENT node ---
+        rag_node = wdf.nodes['ragagent-1']
+        assert rag_node.type == 'rag_agent'
+        assert rag_node.execution_mode == 'MESSAGES'
+        assert rag_node.label == 'RAG Agent 1'
+        # Agent UUID should be resolved to name
+        assert rag_node.config['agent_name'] == 'My RAG Agent'
+        assert 'agentId' not in rag_node.config
+        # KB UUIDs should be resolved to names
+        assert rag_node.config['knowledge_base_names'] == ['Invoice Knowledge Base']
+        assert 'knowledgeBaseIds' not in rag_node.config
+        # UUID reference in primaryInput should be replaced with slug
+        assert '{{fileupload-1.output.text}}' in rag_node.config['primaryInput']
+        assert str(file_uuid) not in rag_node.config['primaryInput']
+
+    def test_execution_mode_is_plain_string(self):
+        """Test that execution_mode is a plain string, not an enum tag."""
+        from workflow_models.enums import ExecutionMode, NodeConfigType
+
+        nodes = [
+            SimpleNamespace(
+                id=INPUT_NODE_ID,
+                config_type=NodeConfigType.PLAIN_TXT_INPUT,
+                execution_mode=ExecutionMode.INPUT,
+                function_name='input_1',
+                parameters={'label': 'Test'},
+                config={},
+            ),
+        ]
+        workflow = SimpleNamespace(
+            id=WORKFLOW_ID,
+            version=1,
+            entry_point=INPUT_NODE_ID,
+            exit_point=INPUT_NODE_ID,
+            state_schema={},
+            organization_id=ORG_ID,
+        )
+        metadata = SimpleNamespace(name='Test', description='', tags=[])
+        edges: list = []
+
+        wdf, _, _ = api_response_to_wdf(
+            workflow,
+            metadata,
+            nodes,
+            edges,
+            {},
+            {},
+        )
+
+        node = wdf.nodes['input-1']
+        # execution_mode should be a plain string, not an enum
+        assert node.execution_mode == 'INPUT'
+        assert type(node.execution_mode) is str
+        # type should be lowercase
+        assert node.type == 'plain_txt_input'
+        assert type(node.type) is str
