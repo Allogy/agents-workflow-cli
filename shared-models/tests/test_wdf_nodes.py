@@ -211,17 +211,80 @@ class TestRagAgentConfig:
         )
         assert config.primaryInput == '{{llmPrompt_1.output.text}}'
 
-    def test_missing_agent_id_raises(self):
+    def test_missing_both_agent_ref_raises(self):
+        """Neither agentId nor agent_name provided should raise."""
         with pytest.raises(ValidationError):
-            RagAgentConfig(knowledgeBaseIds=['kb-1'])  # type: ignore[call-arg]
+            RagAgentConfig(knowledgeBaseIds=['kb-1'])
 
-    def test_missing_knowledge_base_ids_raises(self):
+    def test_missing_both_kb_ref_raises(self):
+        """Neither knowledgeBaseIds nor knowledge_base_names provided should raise."""
         with pytest.raises(ValidationError):
-            RagAgentConfig(agentId='kb-agent')  # type: ignore[call-arg]
+            RagAgentConfig(agentId='kb-agent')
+
+    def test_with_disable_rag_true(self):
+        config = RagAgentConfig(
+            agentId='kb-agent',
+            knowledgeBaseIds=['kb-1'],
+            disableRAG=True,
+        )
+        assert config.disableRAG is True
+
+    def test_with_disable_rag_false(self):
+        config = RagAgentConfig(
+            agentId='kb-agent',
+            knowledgeBaseIds=['kb-1'],
+            disableRAG=False,
+        )
+        assert config.disableRAG is False
+
+    def test_disable_rag_defaults_to_none(self):
+        config = RagAgentConfig(
+            agentId='kb-agent',
+            knowledgeBaseIds=['kb-1'],
+        )
+        assert config.disableRAG is None
 
     def test_knowledge_base_ids_must_be_list(self):
         with pytest.raises(ValidationError):
             RagAgentConfig(agentId='agent', knowledgeBaseIds='kb-1')  # type: ignore[arg-type]
+
+    # --- Name-based references (from workflow pull) ---
+
+    def test_agent_name_instead_of_agent_id(self):
+        """Pulled YAML uses agent_name instead of agentId."""
+        config = RagAgentConfig(
+            agent_name='My Agent',
+            knowledge_base_names=['My KB'],
+        )
+        assert config.agent_name == 'My Agent'
+        assert config.agentId is None
+
+    def test_knowledge_base_names_instead_of_ids(self):
+        """Pulled YAML uses knowledge_base_names instead of knowledgeBaseIds."""
+        config = RagAgentConfig(
+            agentId='agent-uuid',
+            knowledge_base_names=['KB 1', 'KB 2'],
+        )
+        assert config.knowledge_base_names == ['KB 1', 'KB 2']
+        assert config.knowledgeBaseIds is None
+
+    def test_full_name_based_config(self):
+        """Full config with name-based references (as pulled from platform)."""
+        config = RagAgentConfig(
+            agent_name='OpenAI Test Agent',
+            knowledge_base_names=['standards'],
+            primaryInput='{{llmprompt_1.output.text}}',
+            disableRAG=False,
+        )
+        assert config.agent_name == 'OpenAI Test Agent'
+        assert config.knowledge_base_names == ['standards']
+        assert config.primaryInput == '{{llmprompt_1.output.text}}'
+        assert config.disableRAG is False
+
+    def test_no_references_at_all_raises(self):
+        """Config with no agent or KB references should raise."""
+        with pytest.raises(ValidationError):
+            RagAgentConfig(primaryInput='{{input.output.text}}')
 
 
 # ============================================
@@ -351,9 +414,22 @@ class TestRetrieveConfig:
         assert config.enableReranking is False
         assert config.includeMetadata is True
 
-    def test_missing_knowledge_base_id_raises(self):
+    def test_missing_all_kb_refs_raises(self):
+        """No knowledgeBaseId, knowledge_base_name, or knowledge_base_names should raise."""
         with pytest.raises(ValidationError):
-            RetrieveConfig()  # type: ignore[call-arg]
+            RetrieveConfig()
+
+    def test_with_knowledge_base_name(self):
+        """Pulled YAML uses knowledge_base_name instead of knowledgeBaseId."""
+        config = RetrieveConfig(knowledge_base_name='My KB')
+        assert config.knowledge_base_name == 'My KB'
+        assert config.knowledgeBaseId is None
+
+    def test_with_knowledge_base_names_list(self):
+        """Pulled YAML can use knowledge_base_names (list) instead of knowledgeBaseId."""
+        config = RetrieveConfig(knowledge_base_names=['KB 1', 'KB 2'])
+        assert config.knowledge_base_names == ['KB 1', 'KB 2']
+        assert config.knowledgeBaseId is None
 
     def test_top_k_must_be_positive(self):
         with pytest.raises(ValidationError):

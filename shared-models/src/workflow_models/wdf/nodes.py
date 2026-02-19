@@ -95,12 +95,40 @@ class RagAgentConfig(BaseModel):
     """Config for RAG_AGENT nodes.
 
     Uses backend parameters: agentId, knowledgeBaseIds (knowledge bases
-    to query), and primaryInput (variable reference for input routing).
+    to query), primaryInput (variable reference for input routing), and
+    disableRAG (flag to bypass RAG retrieval while keeping the agent).
+
+    After ``workflow pull``, UUID-based fields are replaced with
+    human-readable name variants (``agent_name``, ``knowledge_base_names``).
+    The push command resolves names back to UUIDs before sending to the API.
+    Validation accepts either form: UUID-based **or** name-based.
     """
 
-    agentId: str
-    knowledgeBaseIds: list[str]
+    agentId: str | None = None
+    knowledgeBaseIds: list[str] | None = None
+    agent_name: str | None = None
+    knowledge_base_names: list[str] | None = None
     primaryInput: str | None = None
+    disableRAG: bool | None = None
+
+    @model_validator(mode='after')
+    def check_agent_reference(self) -> 'RagAgentConfig':
+        """Ensure either agentId or agent_name is provided."""
+        if not self.agentId and not self.agent_name:
+            raise ValueError(
+                'RAG_AGENT config requires either agentId (UUID) or agent_name'
+            )
+        return self
+
+    @model_validator(mode='after')
+    def check_kb_reference(self) -> 'RagAgentConfig':
+        """Ensure either knowledgeBaseIds or knowledge_base_names is provided."""
+        if not self.knowledgeBaseIds and not self.knowledge_base_names:
+            raise ValueError(
+                'RAG_AGENT config requires either knowledgeBaseIds (UUIDs) '
+                'or knowledge_base_names'
+            )
+        return self
 
 
 class LlmCallConfig(BaseModel):
@@ -141,14 +169,30 @@ class RetrieveConfig(BaseModel):
 
     Hybrid of backend ``parameters`` (knowledgeBaseId, topK, searchQuery) and
     ``config`` (enable_reranking, include_metadata, metadata_filters).
+
+    After ``workflow pull``, UUID-based ``knowledgeBaseId`` is replaced with
+    ``knowledge_base_name`` (singular) or ``knowledge_base_names`` (list).
+    Validation accepts either form.
     """
 
-    knowledgeBaseId: str
+    knowledgeBaseId: str | None = None
+    knowledge_base_name: str | None = None
+    knowledge_base_names: list[str] | None = None
     topK: int | None = Field(default=None, gt=0)
     searchQuery: str | None = None
     scoreThreshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enableReranking: bool | None = None
     includeMetadata: bool | None = None
+
+    @model_validator(mode='after')
+    def check_kb_reference(self) -> 'RetrieveConfig':
+        """Ensure at least one KB reference is provided."""
+        if not self.knowledgeBaseId and not self.knowledge_base_name and not self.knowledge_base_names:
+            raise ValueError(
+                'RETRIEVE config requires knowledgeBaseId, '
+                'knowledge_base_name, or knowledge_base_names'
+            )
+        return self
 
 
 class DocumentExtractionConfig(BaseModel):
