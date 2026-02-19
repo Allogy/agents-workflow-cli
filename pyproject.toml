@@ -9,7 +9,7 @@ dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0",
     "httpx>=0.27.0",
-    "agents-workflow-models",
+    "agents-workflow-models==0.1.1",
 ]
 
 [tool.uv.sources]
