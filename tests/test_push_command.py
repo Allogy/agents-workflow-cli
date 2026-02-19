@@ -263,14 +263,17 @@ def test_wdf_to_api_payload_create_mode(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
     assert 'workflow' in payload
-    assert payload['workflow']['name'] == 'Test Workflow'
-    assert payload['workflow']['description'] == 'A simple test workflow'
     assert payload['workflow']['version'] == 1
     assert payload['workflow']['organization_id'] == str(org_id)
-    assert 'id' not in payload['workflow']  # Create mode
+    assert payload['workflow_id'] is None  # Create mode
+
+    # Name and description are now in metadata
+    assert 'metadata' in payload
+    assert payload['metadata']['name'] == 'Test Workflow'
+    assert payload['metadata']['description'] == 'A simple test workflow'
 
     assert 'nodes' in payload
     assert 'edges' in payload
@@ -287,9 +290,9 @@ def test_wdf_to_api_payload_update_mode(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id, workflow_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id, workflow_id)
 
-    assert payload['workflow']['id'] == str(workflow_id)
+    assert payload['workflow_id'] == str(workflow_id)
 
 
 def test_wdf_to_api_payload_includes_nodes(simple_workflow):
@@ -298,15 +301,14 @@ def test_wdf_to_api_payload_includes_nodes(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
     assert len(payload['nodes']) == 3
     # Check that nodes have required fields
     for node in payload['nodes']:
-        assert 'slug' in node
-        assert 'node_config_type' in node
+        assert 'id' in node
+        assert 'config_type' in node
         assert 'execution_mode' in node
-        assert 'label' in node
         assert 'config' in node
 
 
@@ -316,13 +318,13 @@ def test_wdf_to_api_payload_includes_edges(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
     assert len(payload['edges']) == 2
     # Check that edges have required fields
     for edge in payload['edges']:
-        assert 'source_node_slug' in edge
-        assert 'target_node_slug' in edge
+        assert 'source_node_id' in edge
+        assert 'target_node_id' in edge
         assert 'edge_type' in edge
 
 
@@ -332,12 +334,12 @@ def test_wdf_to_api_payload_includes_visuals(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
     assert len(payload['node_visuals']) == 3
     # Check that visuals have positions
     for visual in payload['node_visuals']:
-        assert 'node_slug' in visual
+        assert 'node_id' in visual
         assert 'position_x' in visual
         assert 'position_y' in visual
 
@@ -349,10 +351,11 @@ def test_wdf_to_api_payload_resolves_agent_refs(workflow_with_agent):
     agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
     resolved_deps = {'agent:Test Agent': agent_uuid}
 
-    payload = wdf_to_api_payload(workflow_with_agent, resolved_deps, layout, org_id)
+    payload, slug_to_uuid = wdf_to_api_payload(workflow_with_agent, resolved_deps, layout, org_id)
 
-    # Find the agent node
-    agent_node = next(n for n in payload['nodes'] if n['slug'] == 'agent')
+    # Find the agent node by its UUID
+    agent_node_uuid = slug_to_uuid['agent']
+    agent_node = next(n for n in payload['nodes'] if n['id'] == str(agent_node_uuid))
     assert agent_node['config']['agent_id'] == str(agent_uuid)
     assert 'agent_name' not in agent_node['config']  # Name should be replaced
 
@@ -364,10 +367,11 @@ def test_wdf_to_api_payload_resolves_kb_refs(workflow_with_kb):
     kb_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
     resolved_deps = {'kb:Test KB': kb_uuid}
 
-    payload = wdf_to_api_payload(workflow_with_kb, resolved_deps, layout, org_id)
+    payload, slug_to_uuid = wdf_to_api_payload(workflow_with_kb, resolved_deps, layout, org_id)
 
-    # Find the retrieval node
-    retrieval_node = next(n for n in payload['nodes'] if n['slug'] == 'retrieval')
+    # Find the retrieval node by its UUID
+    retrieval_node_uuid = slug_to_uuid['retrieval']
+    retrieval_node = next(n for n in payload['nodes'] if n['id'] == str(retrieval_node_uuid))
     assert retrieval_node['config']['knowledge_base_id'] == str(kb_uuid)
     assert 'knowledge_base_name' not in retrieval_node['config']  # Name should be replaced
 
@@ -378,7 +382,7 @@ def test_wdf_to_api_payload_generates_io_for_nodes(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
     # Nodes should have inputs/outputs based on their type
     # plain_txt_input has output
@@ -412,9 +416,9 @@ def test_wdf_to_api_payload_empty_description(simple_workflow):
     layout = generate_node_layout(simple_workflow)
     resolved_deps = {}
 
-    payload = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
+    payload, _ = wdf_to_api_payload(simple_workflow, resolved_deps, layout, org_id)
 
-    assert payload['workflow']['description'] == ''
+    assert payload['metadata']['description'] == ''
 
 
 def test_generate_node_layout_single_node():

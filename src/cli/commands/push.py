@@ -266,9 +266,7 @@ def wdf_to_api_payload(
         target_uuid = slug_to_uuid.get(edge_def.to)
 
         if not source_uuid or not target_uuid:
-            raise PushError(
-                f'Edge references unknown node: {edge_def.from_node} -> {edge_def.to}'
-            )
+            raise PushError(f'Edge references unknown node: {edge_def.from_node} -> {edge_def.to}')
 
         edge_payload = {
             'workflow_version': workflow.version,
@@ -368,7 +366,9 @@ def push_workflow(
         if not org_id:
             raise PushError('Organization ID is required (set via --org or WORKFLOW_ORG_ID)')
 
-        payload, slug_to_uuid = wdf_to_api_payload(workflow, resolved_deps, layout, org_id, workflow_id)
+        payload, slug_to_uuid = wdf_to_api_payload(
+            workflow, resolved_deps, layout, org_id, workflow_id
+        )
 
         # Step 6: Call atomic save endpoint
         console.print(f'[dim]Pushing to {config.host}...[/dim]', end=' ')
