@@ -345,6 +345,32 @@ class WorkflowClient:
     # Dependency Resolution
     # ==================================================================
 
+    def list_agents(self, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        """List all accessible agents.
+
+        Args:
+            offset: Pagination offset.
+            limit: Maximum number of results (max 100).
+
+        Returns:
+            List of agent data dictionaries.
+        """
+        response = self._get('/v1/agents/', params={'offset': offset, 'limit': limit})
+        return response.json()
+
+    def list_knowledge_bases(self, *, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        """List all accessible knowledge bases.
+
+        Args:
+            offset: Pagination offset.
+            limit: Maximum number of results (max 100).
+
+        Returns:
+            List of knowledge base data dictionaries.
+        """
+        response = self._get('/v1/knowledge_bases/', params={'offset': offset, 'limit': limit})
+        return response.json()
+
     def find_agent_by_name(self, name: str) -> dict[str, Any] | None:
         """Find an agent by name (case-insensitive).
 
@@ -357,8 +383,7 @@ class WorkflowClient:
         Returns:
             Agent data as a dict if found, None otherwise.
         """
-        response = self._get('/v1/agents/', params={'offset': 0, 'limit': 100})
-        agents: list[dict[str, Any]] = response.json()
+        agents = self.list_agents()
         name_lower = name.lower()
         for agent in agents:
             if agent.get('name', '').lower() == name_lower:
@@ -377,8 +402,7 @@ class WorkflowClient:
         Returns:
             Knowledge base data as a dict if found, None otherwise.
         """
-        response = self._get('/v1/knowledge_bases/', params={'offset': 0, 'limit': 100})
-        knowledge_bases: list[dict[str, Any]] = response.json()
+        knowledge_bases = self.list_knowledge_bases()
         name_lower = name.lower()
         for kb in knowledge_bases:
             if kb.get('name', '').lower() == name_lower:
