@@ -139,12 +139,13 @@ class StructuredOutputConfig(BaseModel):
 class RetrieveConfig(BaseModel):
     """Config for RETRIEVE nodes.
 
-    Hybrid of backend ``parameters`` (knowledgeBaseId, topK) and
+    Hybrid of backend ``parameters`` (knowledgeBaseId, topK, searchQuery) and
     ``config`` (enable_reranking, include_metadata, metadata_filters).
     """
 
     knowledgeBaseId: str
     topK: int | None = Field(default=None, gt=0)
+    searchQuery: str | None = None
     scoreThreshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enableReranking: bool | None = None
     includeMetadata: bool | None = None

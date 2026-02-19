@@ -272,9 +272,14 @@ def build_node_parameters(
         elif 'knowledgeBaseId' in node_config:
             kb_val = node_config['knowledgeBaseId']
             params['knowledgeBaseId'] = kb_val if isinstance(kb_val, list) else [kb_val]
-        for key in ('topK', 'searchQuery', 'scoreThreshold'):
+        for key in ('topK', 'scoreThreshold'):
             if key in node_config:
                 params[key] = node_config[key]
+        # searchQuery may contain variable references — replace slugs with UUIDs
+        if 'searchQuery' in node_config:
+            params['searchQuery'] = _replace_slugs_with_uuids(
+                node_config['searchQuery'], slug_to_uuid
+            )
 
     elif node_type == 'human_review':
         if 'review_prompt' in node_config:

@@ -25,6 +25,7 @@ from cli.commands.pull import (
     extract_node_config,
     generate_slug,
     replace_uuid_references,
+    replace_variable_references,
     reverse_resolve_dependencies,
     slugify,
 )
@@ -1475,6 +1476,76 @@ class TestReplaceUuidReferences:
         assert result['primaryInput'] == (
             '{{plainTextInput_1.output.text}} also {{file-upload-1.output.text}}'
         )
+
+
+# ============================================================================
+# Replace Variable References Tests (with function_name normalization)
+# ============================================================================
+
+
+class TestReplaceVariableReferences:
+    """Test replace_variable_references with function_name normalization."""
+
+    def test_normalizes_function_name_refs(self):
+        """Test that mixed-case function_name references are lowercased to match slugs."""
+        uuid_to_slug: dict[UUID, str] = {}
+        func_name_to_slug = {
+            'fileUpload_1': 'fileupload_1',
+            'plainTextInput_1': 'plaintextinput_1',
+        }
+        config = {
+            'primaryInput': '{{plainTextInput_1.output.text}} and {{fileUpload_1.output.text}}'
+        }
+        result = replace_variable_references(config, uuid_to_slug, func_name_to_slug)
+        assert result['primaryInput'] == (
+            '{{plaintextinput_1.output.text}} and {{fileupload_1.output.text}}'
+        )
+
+    def test_handles_both_uuid_and_function_name_refs(self):
+        """Test replacing both UUID and function_name references in one string."""
+        uuid1 = UUID('4a8611ec-ee1e-4d4d-a66e-76ae207d34ee')
+        uuid_to_slug = {uuid1: 'fileupload_1'}
+        func_name_to_slug = {'plainTextInput_1': 'plaintextinput_1'}
+        config = {
+            'primaryInput': (
+                '{{plainTextInput_1.output.text}} also '
+                '{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}'
+            )
+        }
+        result = replace_variable_references(config, uuid_to_slug, func_name_to_slug)
+        assert result['primaryInput'] == (
+            '{{plaintextinput_1.output.text}} also {{fileupload_1.output.text}}'
+        )
+
+    def test_recursive_into_nested_dicts(self):
+        """Test that variable references in nested dicts are replaced."""
+        uuid1 = UUID('11111111-1111-1111-1111-111111111111')
+        uuid_to_slug = {uuid1: 'input_1'}
+        config = {'nested': {'template': '{{11111111-1111-1111-1111-111111111111.output.text}}'}}
+        result = replace_variable_references(config, uuid_to_slug)
+        assert result['nested']['template'] == '{{input_1.output.text}}'
+
+    def test_recursive_into_lists(self):
+        """Test that variable references in lists are replaced."""
+        uuid1 = UUID('11111111-1111-1111-1111-111111111111')
+        uuid_to_slug = {uuid1: 'input_1'}
+        config = {'items': ['{{11111111-1111-1111-1111-111111111111.output.text}}', 'static']}
+        result = replace_variable_references(config, uuid_to_slug)
+        assert result['items'] == ['{{input_1.output.text}}', 'static']
+
+    def test_already_lowercase_function_name_unchanged(self):
+        """Test that already-lowercase function_name refs are not double-processed."""
+        func_name_to_slug = {'input_1': 'input_1'}
+        config = {'template': '{{input_1.output.text}}'}
+        result = replace_variable_references(config, {}, func_name_to_slug)
+        assert result['template'] == '{{input_1.output.text}}'
+
+    def test_no_func_name_map_skips_normalization(self):
+        """Test that function_name normalization is skipped when no map provided."""
+        config = {'template': '{{fileUpload_1.output.text}}'}
+        result = replace_variable_references(config, {})
+        # Without func_name_to_slug, mixed-case is preserved
+        assert result['template'] == '{{fileUpload_1.output.text}}'
 
 
 # ============================================================================

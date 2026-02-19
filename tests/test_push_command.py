@@ -582,6 +582,42 @@ class TestBuildNodeParameters:
         params = build_node_parameters(node_def, 'my-input', {}, {})
         assert params['label'] == 'my-input'
 
+    def test_retrieve_search_query_slug_replaced(self):
+        """Test that searchQuery slug references are replaced with UUIDs."""
+        input_uuid = UUID('11111111-1111-1111-1111-111111111111')
+        slug_to_uuid = {'form_input': input_uuid}
+        node_config = {
+            'knowledgeBaseId': ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],
+            'topK': 5,
+            'searchQuery': '{{form_input.output.formData.query}}',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='retrieve',
+            execution_mode='FLOW',
+            label='Search',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'search', node_config, slug_to_uuid)
+        # searchQuery should have slug replaced with UUID
+        assert f'{{{{{str(input_uuid)}' in params['searchQuery']
+        assert 'form_input' not in params['searchQuery']
+
+    def test_retrieve_search_query_without_ref(self):
+        """Test that searchQuery without variable refs is passed through."""
+        node_config = {
+            'knowledgeBaseId': ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],
+            'topK': 5,
+            'searchQuery': 'static query text',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='retrieve',
+            execution_mode='FLOW',
+            label='Search',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'search', node_config, {})
+        assert params['searchQuery'] == 'static query text'
+
 
 class TestWdfToApiPayloadParameters:
     """Test that wdf_to_api_payload populates parameters correctly."""

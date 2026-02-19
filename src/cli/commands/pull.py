@@ -42,6 +42,10 @@ UUID_REFERENCE_RE = re.compile(
     r'\{\{([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
 )
 
+# Regex for matching function_name-based variable references like {{fileUpload_1.output.text}}
+# Matches {{ followed by a word (letters, digits, underscores) that is NOT a UUID.
+FUNC_NAME_REFERENCE_RE = re.compile(r'\{\{([a-zA-Z_][a-zA-Z0-9_]*)(?=\.)')
+
 # Fields to strip from parameters — frontend-only UI state, not meaningful for WDF
 PARAMETERS_UI_FIELDS = frozenset(
     {
@@ -289,31 +293,52 @@ def extract_node_config(
     return result
 
 
-def replace_uuid_references(
+def replace_variable_references(
     config: dict[str, Any],
     uuid_to_slug: dict[UUID, str],
+    func_name_to_slug: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Replace UUID variable references in config values with slug-based references.
+    """Replace variable references in config values with slug-based references.
 
-    Template strings like ``{{4a8611ec-ee1e-4d4d-a66e-76ae207d34ee.output.text}}``
-    are replaced with ``{{file-upload-1.output.text}}`` using the uuid_to_slug map.
+    Performs two passes on all string values (recursively through dicts/lists):
 
-    Only processes string values in the config dict (not nested dicts/lists).
+    1. **UUID references**: ``{{4a8611ec-....output.text}}`` → ``{{fileupload_1.output.text}}``
+    2. **function_name references**: ``{{fileUpload_1.output.text}}`` → ``{{fileupload_1.output.text}}``
 
     Args:
         config: The node config dict to process.
         uuid_to_slug: Mapping from node UUIDs to slug strings.
+        func_name_to_slug: Optional mapping from original function_names to slugs.
+            Used to normalize mixed-case function_name references.
 
     Returns:
-        A new config dict with UUID references replaced.
+        A new config dict with all variable references normalized to slugs.
     """
-    result: dict[str, Any] = {}
-    for key, value in config.items():
-        if isinstance(value, str):
-            result[key] = _replace_uuids_in_string(value, uuid_to_slug)
-        else:
-            result[key] = value
-    return result
+    return _replace_refs_recursive(config, uuid_to_slug, func_name_to_slug or {})
+
+
+# Keep the old name as an alias for backward compatibility (tests import it)
+replace_uuid_references = replace_variable_references
+
+
+def _replace_refs_recursive(
+    value: Any,
+    uuid_to_slug: dict[UUID, str],
+    func_name_to_slug: dict[str, str],
+) -> Any:
+    """Recursively replace variable references in any value."""
+    if isinstance(value, str):
+        text = _replace_uuids_in_string(value, uuid_to_slug)
+        text = _normalize_func_name_refs(text, func_name_to_slug)
+        return text
+    elif isinstance(value, dict):
+        return {
+            k: _replace_refs_recursive(v, uuid_to_slug, func_name_to_slug) for k, v in value.items()
+        }
+    elif isinstance(value, list):
+        return [_replace_refs_recursive(item, uuid_to_slug, func_name_to_slug) for item in value]
+    else:
+        return value
 
 
 def _replace_uuids_in_string(text: str, uuid_to_slug: dict[UUID, str]) -> str:
@@ -331,6 +356,25 @@ def _replace_uuids_in_string(text: str, uuid_to_slug: dict[UUID, str]) -> str:
         return match.group(0)  # Return original if not found
 
     return UUID_REFERENCE_RE.sub(_replacer, text)
+
+
+def _normalize_func_name_refs(text: str, func_name_to_slug: dict[str, str]) -> str:
+    """Normalize function_name-based references to match lowercased slugs.
+
+    Replaces ``{{fileUpload_1.output.text}}`` with ``{{fileupload_1.output.text}}``
+    when the function_name ``fileUpload_1`` maps to slug ``fileupload_1``.
+    """
+    if not func_name_to_slug:
+        return text
+
+    def _replacer(match: re.Match) -> str:
+        func_name = match.group(1)
+        slug = func_name_to_slug.get(func_name)
+        if slug and slug != func_name:
+            return '{{' + slug
+        return match.group(0)
+
+    return FUNC_NAME_REFERENCE_RE.sub(_replacer, text)
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +530,7 @@ def api_response_to_wdf(
     # --- Step 1: Generate slugs for all nodes ---
     uuid_to_slug: dict[UUID, str] = {}
     slug_to_uuid: dict[str, UUID] = {}
+    func_name_to_slug: dict[str, str] = {}
     existing_slugs: set[str] = set()
 
     for node in nodes:
@@ -500,6 +545,9 @@ def api_response_to_wdf(
 
         uuid_to_slug[node_uuid] = slug
         slug_to_uuid[slug] = node_uuid
+        # Map original function_name to slug for normalizing template references
+        if fn_name and fn_name.strip():
+            func_name_to_slug[fn_name] = slug
 
     # --- Step 2: Convert nodes ---
     wdf_nodes: dict[str, NodeDefinition] = {}
@@ -520,9 +568,10 @@ def api_response_to_wdf(
         raw_config = getattr(node, 'config', {}) or {}
         config = extract_node_config(config_type, parameters, raw_config)
 
-        # Replace UUID variable references in template strings
-        # (e.g., {{4a8611ec-...output.text}} -> {{file-upload-1.output.text}})
-        config = replace_uuid_references(config, uuid_to_slug)
+        # Replace variable references in template strings:
+        # 1. UUID refs: {{4a8611ec-...output.text}} -> {{fileupload_1.output.text}}
+        # 2. function_name refs: {{fileUpload_1.output.text}} -> {{fileupload_1.output.text}}
+        config = replace_variable_references(config, uuid_to_slug, func_name_to_slug)
 
         # --- Reverse-resolve agent/KB UUIDs to human-readable names ---
 
