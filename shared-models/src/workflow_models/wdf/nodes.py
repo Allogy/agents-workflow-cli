@@ -109,15 +109,16 @@ class RagAgentConfig(BaseModel):
     agent_name: str | None = None
     knowledge_base_names: list[str] | None = None
     primaryInput: str | None = None
-    disableRAG: bool | None = None
+    disableRAG: bool | None = Field(
+        default=None,
+        description='When true, bypasses RAG retrieval while keeping the agent.',
+    )
 
     @model_validator(mode='after')
     def check_agent_reference(self) -> 'RagAgentConfig':
         """Ensure either agentId or agent_name is provided."""
         if not self.agentId and not self.agent_name:
-            raise ValueError(
-                'RAG_AGENT config requires either agentId (UUID) or agent_name'
-            )
+            raise ValueError('RAG_AGENT config requires either agentId (UUID) or agent_name')
         return self
 
     @model_validator(mode='after')
@@ -125,8 +126,7 @@ class RagAgentConfig(BaseModel):
         """Ensure either knowledgeBaseIds or knowledge_base_names is provided."""
         if not self.knowledgeBaseIds and not self.knowledge_base_names:
             raise ValueError(
-                'RAG_AGENT config requires either knowledgeBaseIds (UUIDs) '
-                'or knowledge_base_names'
+                'RAG_AGENT config requires either knowledgeBaseIds (UUIDs) or knowledge_base_names'
             )
         return self
 
@@ -187,7 +187,11 @@ class RetrieveConfig(BaseModel):
     @model_validator(mode='after')
     def check_kb_reference(self) -> 'RetrieveConfig':
         """Ensure at least one KB reference is provided."""
-        if not self.knowledgeBaseId and not self.knowledge_base_name and not self.knowledge_base_names:
+        if (
+            not self.knowledgeBaseId
+            and not self.knowledge_base_name
+            and not self.knowledge_base_names
+        ):
             raise ValueError(
                 'RETRIEVE config requires knowledgeBaseId, '
                 'knowledge_base_name, or knowledge_base_names'

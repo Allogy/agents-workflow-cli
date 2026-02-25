@@ -164,41 +164,38 @@ def test_resolve_dependencies_no_deps(simple_workflow, mock_client):
     """Test resolving workflow with no dependencies."""
     resolved = resolve_dependencies(simple_workflow, mock_client)
     assert resolved == {}
-    mock_client.find_agent_by_name.assert_not_called()
-    mock_client.find_knowledge_base_by_name.assert_not_called()
+    mock_client.list_agents.assert_not_called()
+    mock_client.list_knowledge_bases.assert_not_called()
 
 
 def test_resolve_dependencies_with_agent(workflow_with_agent, mock_client):
     """Test resolving workflow with agent reference."""
-    mock_client.find_agent_by_name.return_value = {
-        'id': '12345678-1234-1234-1234-123456789012',
-        'name': 'Test Agent',
-    }
+    mock_client.list_agents.return_value = [
+        {'id': '12345678-1234-1234-1234-123456789012', 'name': 'Test Agent'},
+    ]
 
     resolved = resolve_dependencies(workflow_with_agent, mock_client)
 
     assert 'agent:Test Agent' in resolved
     assert resolved['agent:Test Agent'] == UUID('12345678-1234-1234-1234-123456789012')
-    mock_client.find_agent_by_name.assert_called_once_with('Test Agent')
+    mock_client.list_agents.assert_called_once()
 
 
 def test_resolve_dependencies_with_kb(workflow_with_kb, mock_client):
     """Test resolving workflow with knowledge base reference."""
-    mock_client.find_knowledge_base_by_name.return_value = {
-        'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        'name': 'Test KB',
-    }
+    mock_client.list_knowledge_bases.return_value = [
+        {'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'name': 'Test KB'},
+    ]
 
     resolved = resolve_dependencies(workflow_with_kb, mock_client)
 
     assert 'kb:Test KB' in resolved
     assert resolved['kb:Test KB'] == UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
-    mock_client.find_knowledge_base_by_name.assert_called_once_with('Test KB')
+    mock_client.list_knowledge_bases.assert_called_once()
 
 
 def test_resolve_dependencies_agent_not_found(workflow_with_agent, mock_client):
     """Test error when agent cannot be resolved."""
-    mock_client.find_agent_by_name.return_value = None
     mock_client.list_agents.return_value = []
 
     with pytest.raises(DependencyResolutionError, match="Cannot resolve agent 'Test Agent'"):
@@ -207,7 +204,6 @@ def test_resolve_dependencies_agent_not_found(workflow_with_agent, mock_client):
 
 def test_resolve_dependencies_kb_not_found(workflow_with_kb, mock_client):
     """Test error when knowledge base cannot be resolved."""
-    mock_client.find_knowledge_base_by_name.return_value = None
     mock_client.list_knowledge_bases.return_value = []
 
     with pytest.raises(DependencyResolutionError, match="Cannot resolve knowledge base 'Test KB'"):
@@ -680,7 +676,7 @@ class TestWdfToApiPayloadParameters:
             exit='rag',
         )
         mock_client = MagicMock()
-        mock_client.find_knowledge_base_by_name.side_effect = [
+        mock_client.list_knowledge_bases.return_value = [
             {'id': '11111111-1111-1111-1111-111111111111', 'name': 'KB One'},
             {'id': '22222222-2222-2222-2222-222222222222', 'name': 'KB Two'},
         ]
@@ -688,7 +684,8 @@ class TestWdfToApiPayloadParameters:
         resolved = resolve_dependencies(workflow, mock_client)
         assert 'kb:KB One' in resolved
         assert 'kb:KB Two' in resolved
-        assert mock_client.find_knowledge_base_by_name.call_count == 2
+        assert resolved['kb:KB One'] == UUID('11111111-1111-1111-1111-111111111111')
+        assert resolved['kb:KB Two'] == UUID('22222222-2222-2222-2222-222222222222')
 
 
 # ============================================================================
@@ -761,7 +758,7 @@ class TestUuidPassthrough:
         assert f'agent:{agent_uuid_str}' in resolved
         assert resolved[f'agent:{agent_uuid_str}'] == UUID(agent_uuid_str)
         # Critically: no API call should be made
-        mock_client.find_agent_by_name.assert_not_called()
+        mock_client.list_agents.assert_not_called()
 
     def test_kb_name_with_uuid_skips_api_call(self, mock_client):
         """Scenario: UUID references are passed through for knowledge bases.
@@ -796,7 +793,7 @@ class TestUuidPassthrough:
 
         assert f'kb:{kb_uuid_str}' in resolved
         assert resolved[f'kb:{kb_uuid_str}'] == UUID(kb_uuid_str)
-        mock_client.find_knowledge_base_by_name.assert_not_called()
+        mock_client.list_knowledge_bases.assert_not_called()
 
     def test_kb_names_list_with_uuids_skips_api_call(self, mock_client):
         """Test that UUID references in knowledge_base_names list are passed through."""
@@ -828,7 +825,7 @@ class TestUuidPassthrough:
         assert f'kb:{kb_uuid2}' in resolved
         assert resolved[f'kb:{kb_uuid1}'] == UUID(kb_uuid1)
         assert resolved[f'kb:{kb_uuid2}'] == UUID(kb_uuid2)
-        mock_client.find_knowledge_base_by_name.assert_not_called()
+        mock_client.list_knowledge_bases.assert_not_called()
 
     def test_mixed_uuid_and_name_references(self, mock_client):
         """Test that a mix of UUID and name references works correctly."""
@@ -856,10 +853,9 @@ class TestUuidPassthrough:
             exit='rag',
         )
 
-        mock_client.find_knowledge_base_by_name.return_value = {
-            'id': resolved_kb_uuid,
-            'name': kb_name,
-        }
+        mock_client.list_knowledge_bases.return_value = [
+            {'id': resolved_kb_uuid, 'name': kb_name},
+        ]
 
         resolved = resolve_dependencies(workflow, mock_client)
 
@@ -868,7 +864,7 @@ class TestUuidPassthrough:
         # Name should be resolved via API
         assert resolved[f'kb:{kb_name}'] == UUID(resolved_kb_uuid)
         # Only the name should trigger an API call
-        mock_client.find_knowledge_base_by_name.assert_called_once_with(kb_name)
+        mock_client.list_knowledge_bases.assert_called_once()
 
 
 # ============================================================================
@@ -908,7 +904,6 @@ class TestDependencyResolutionErrors:
             exit='agent',
         )
 
-        mock_client.find_agent_by_name.return_value = None
         mock_client.list_agents.return_value = [
             {'id': '111', 'name': 'Invoice Agent'},
             {'id': '222', 'name': 'Support Agent'},
@@ -947,7 +942,6 @@ class TestDependencyResolutionErrors:
             exit='retrieval',
         )
 
-        mock_client.find_knowledge_base_by_name.return_value = None
         mock_client.list_knowledge_bases.return_value = [
             {'id': '111', 'name': 'Company Policies'},
             {'id': '222', 'name': 'Product Docs'},
@@ -986,7 +980,6 @@ class TestDependencyResolutionErrors:
             exit='agent',
         )
 
-        mock_client.find_agent_by_name.return_value = None
         mock_client.list_agents.return_value = []
 
         with pytest.raises(DependencyResolutionError, match='Cannot resolve agent') as exc_info:
@@ -1051,7 +1044,7 @@ class TestLockfileDependencyCache:
 
         assert resolved['agent:Test Agent'] == agent_uuid
         # No API call should be made — used cached value
-        mock_client.find_agent_by_name.assert_not_called()
+        mock_client.list_agents.assert_not_called()
 
     def test_cached_kb_skips_api_call(self, mock_client):
         """Test that cached KB mapping skips API call."""
@@ -1093,7 +1086,7 @@ class TestLockfileDependencyCache:
         resolved = resolve_dependencies(workflow, mock_client, existing_lock=existing_lock)
 
         assert resolved['kb:Test KB'] == kb_uuid
-        mock_client.find_knowledge_base_by_name.assert_not_called()
+        mock_client.list_knowledge_bases.assert_not_called()
 
     def test_uncached_dependency_still_calls_api(self, mock_client):
         """Test that dependencies not in cache are resolved via API."""
@@ -1131,15 +1124,14 @@ class TestLockfileDependencyCache:
             exit='agent',
         )
 
-        mock_client.find_agent_by_name.return_value = {
-            'id': '12345678-1234-1234-1234-123456789012',
-            'name': 'New Agent',
-        }
+        mock_client.list_agents.return_value = [
+            {'id': '12345678-1234-1234-1234-123456789012', 'name': 'New Agent'},
+        ]
 
         resolved = resolve_dependencies(workflow, mock_client, existing_lock=existing_lock)
 
         assert resolved['agent:New Agent'] == UUID('12345678-1234-1234-1234-123456789012')
-        mock_client.find_agent_by_name.assert_called_once_with('New Agent')
+        mock_client.list_agents.assert_called_once()
 
     def test_no_lockfile_still_resolves_via_api(self, mock_client):
         """Test that resolve_dependencies works without a lockfile (existing_lock=None)."""
@@ -1164,12 +1156,11 @@ class TestLockfileDependencyCache:
             exit='agent',
         )
 
-        mock_client.find_agent_by_name.return_value = {
-            'id': '12345678-1234-1234-1234-123456789012',
-            'name': 'Test Agent',
-        }
+        mock_client.list_agents.return_value = [
+            {'id': '12345678-1234-1234-1234-123456789012', 'name': 'Test Agent'},
+        ]
 
         resolved = resolve_dependencies(workflow, mock_client, existing_lock=None)
 
         assert resolved['agent:Test Agent'] == UUID('12345678-1234-1234-1234-123456789012')
-        mock_client.find_agent_by_name.assert_called_once_with('Test Agent')
+        mock_client.list_agents.assert_called_once()

@@ -34,6 +34,22 @@ from cli.commands.push import (
 from cli.lockfile import WorkflowLock
 
 # ---------------------------------------------------------------------------
+# Known dev-environment resource UUIDs
+# ---------------------------------------------------------------------------
+
+# Agents
+DATA_ANALYST_AGENT_UUID = 'e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0'
+CODE_ASSISTANT_AGENT_UUID = '2792240d-07cf-4674-82be-9b71189bb286'
+
+# Knowledge bases
+STANDARDS_KB_UUID = '6c26048d-2f9c-4177-a126-f2ed8cd02a0e'
+INDUSTRY_KB_UUID = 'e70c07d8-8dbe-4833-9e42-a10dd0d21893'
+
+# Dummy UUIDs for lockfile scaffolding
+DUMMY_WORKFLOW_UUID = '00000000-0000-0000-0000-000000000001'
+DUMMY_NODE_UUID = '00000000-0000-0000-0000-000000000010'
+
+# ---------------------------------------------------------------------------
 # Helper builders
 # ---------------------------------------------------------------------------
 
@@ -173,7 +189,7 @@ class TestResolveDependenciesLive:
         assert 'agent:Data Analyst Agent' in resolved
         agent_uuid = resolved['agent:Data Analyst Agent']
         assert isinstance(agent_uuid, UUID)
-        assert str(agent_uuid) == 'e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0'
+        assert str(agent_uuid) == DATA_ANALYST_AGENT_UUID
 
     def test_resolve_kb_by_name(self, live_client: WorkflowClient) -> None:
         """A workflow with knowledge_base_name should resolve to a UUID via API."""
@@ -193,7 +209,7 @@ class TestResolveDependenciesLive:
         assert 'kb:standards' in resolved
         kb_uuid = resolved['kb:standards']
         assert isinstance(kb_uuid, UUID)
-        assert str(kb_uuid) == '6c26048d-2f9c-4177-a126-f2ed8cd02a0e'
+        assert str(kb_uuid) == STANDARDS_KB_UUID
 
     def test_resolve_kb_names_list(self, live_client: WorkflowClient) -> None:
         """knowledge_base_names list should resolve all entries."""
@@ -216,7 +232,7 @@ class TestResolveDependenciesLive:
         assert 'agent:Data Analyst Agent' in resolved
         assert 'kb:standards' in resolved
         assert 'kb:industry' in resolved
-        assert str(resolved['kb:industry']) == 'e70c07d8-8dbe-4833-9e42-a10dd0d21893'
+        assert str(resolved['kb:industry']) == INDUSTRY_KB_UUID
 
     def test_resolve_nonexistent_agent_raises_with_alternatives(
         self, live_client: WorkflowClient
@@ -278,7 +294,6 @@ class TestUuidPassthroughLive:
     def test_agent_uuid_passthrough(self, live_client: WorkflowClient) -> None:
         """When agent_name is already a UUID, resolve_dependencies returns it
         without calling find_agent_by_name."""
-        raw_uuid = 'e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0'
         workflow = _make_workflow(
             {
                 'input': _input_node(),
@@ -286,18 +301,18 @@ class TestUuidPassthroughLive:
                     type='agent',
                     execution_mode='MESSAGES',
                     label='Agent',
-                    config={'agent_name': raw_uuid},
+                    config={'agent_name': DATA_ANALYST_AGENT_UUID},
                 ),
             }
         )
 
         resolved = resolve_dependencies(workflow, live_client)
-        assert f'agent:{raw_uuid}' in resolved
-        assert resolved[f'agent:{raw_uuid}'] == UUID(raw_uuid)
+        key = f'agent:{DATA_ANALYST_AGENT_UUID}'
+        assert key in resolved
+        assert resolved[key] == UUID(DATA_ANALYST_AGENT_UUID)
 
     def test_kb_uuid_passthrough(self, live_client: WorkflowClient) -> None:
         """When knowledge_base_name is already a UUID, it passes through."""
-        raw_uuid = '6c26048d-2f9c-4177-a126-f2ed8cd02a0e'
         workflow = _make_workflow(
             {
                 'input': _input_node(),
@@ -305,18 +320,18 @@ class TestUuidPassthroughLive:
                     type='retrieve',
                     execution_mode='FLOW',
                     label='Retrieval',
-                    config={'knowledge_base_name': raw_uuid},
+                    config={'knowledge_base_name': STANDARDS_KB_UUID},
                 ),
             }
         )
 
         resolved = resolve_dependencies(workflow, live_client)
-        assert f'kb:{raw_uuid}' in resolved
-        assert resolved[f'kb:{raw_uuid}'] == UUID(raw_uuid)
+        key = f'kb:{STANDARDS_KB_UUID}'
+        assert key in resolved
+        assert resolved[key] == UUID(STANDARDS_KB_UUID)
 
     def test_mixed_uuid_and_name(self, live_client: WorkflowClient) -> None:
         """A workflow with one UUID ref and one name ref resolves both."""
-        agent_uuid = 'e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0'
         workflow = _make_workflow(
             {
                 'input': _input_node(),
@@ -325,7 +340,7 @@ class TestUuidPassthroughLive:
                     execution_mode='MESSAGES',
                     label='RAG Agent',
                     config={
-                        'agent_name': agent_uuid,  # UUID passthrough
+                        'agent_name': DATA_ANALYST_AGENT_UUID,  # UUID passthrough
                         'knowledge_base_names': ['standards'],  # name lookup
                     },
                 ),
@@ -333,7 +348,7 @@ class TestUuidPassthroughLive:
         )
 
         resolved = resolve_dependencies(workflow, live_client)
-        assert resolved[f'agent:{agent_uuid}'] == UUID(agent_uuid)
+        assert resolved[f'agent:{DATA_ANALYST_AGENT_UUID}'] == UUID(DATA_ANALYST_AGENT_UUID)
         assert 'kb:standards' in resolved
         assert isinstance(resolved['kb:standards'], UUID)
 
@@ -353,7 +368,7 @@ class TestLockfileCacheLive:
         """When the lockfile already has agent:Name, the cached UUID is used."""
         cached_uuid = UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
         lock = WorkflowLock(
-            workflow_id=UUID('00000000-0000-0000-0000-000000000001'),
+            workflow_id=UUID(DUMMY_WORKFLOW_UUID),
             organization_id=UUID(org_id),
             version=1,
             instance='https://dev.sb.allogy.com',
@@ -381,7 +396,7 @@ class TestLockfileCacheLive:
         """When the lockfile already has kb:Name, the cached UUID is used."""
         cached_uuid = UUID('11111111-2222-3333-4444-555555555555')
         lock = WorkflowLock(
-            workflow_id=UUID('00000000-0000-0000-0000-000000000001'),
+            workflow_id=UUID(DUMMY_WORKFLOW_UUID),
             organization_id=UUID(org_id),
             version=1,
             instance='https://dev.sb.allogy.com',
@@ -407,7 +422,7 @@ class TestLockfileCacheLive:
     def test_uncached_falls_through_to_api(self, live_client: WorkflowClient, org_id: str) -> None:
         """When the lockfile exists but doesn't have the key, the API is called."""
         lock = WorkflowLock(
-            workflow_id=UUID('00000000-0000-0000-0000-000000000001'),
+            workflow_id=UUID(DUMMY_WORKFLOW_UUID),
             organization_id=UUID(org_id),
             version=1,
             instance='https://dev.sb.allogy.com',
@@ -429,7 +444,7 @@ class TestLockfileCacheLive:
 
         resolved = resolve_dependencies(workflow, live_client, existing_lock=lock)
         # Should resolve via API to the real UUID
-        assert resolved['agent:Data Analyst Agent'] == UUID('e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0')
+        assert resolved['agent:Data Analyst Agent'] == UUID(DATA_ANALYST_AGENT_UUID)
 
     def test_no_lockfile_resolves_via_api(self, live_client: WorkflowClient) -> None:
         """When existing_lock is None, everything resolves via API."""
@@ -449,8 +464,8 @@ class TestLockfileCacheLive:
         )
 
         resolved = resolve_dependencies(workflow, live_client, existing_lock=None)
-        assert resolved['agent:Data Analyst Agent'] == UUID('e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0')
-        assert resolved['kb:standards'] == UUID('6c26048d-2f9c-4177-a126-f2ed8cd02a0e')
+        assert resolved['agent:Data Analyst Agent'] == UUID(DATA_ANALYST_AGENT_UUID)
+        assert resolved['kb:standards'] == UUID(STANDARDS_KB_UUID)
 
 
 # ---------------------------------------------------------------------------
@@ -486,11 +501,11 @@ class TestLockfileRoundtripLive:
 
         # Build a lockfile with the resolved deps
         lock = WorkflowLock(
-            workflow_id=UUID('00000000-0000-0000-0000-000000000001'),
+            workflow_id=UUID(DUMMY_WORKFLOW_UUID),
             organization_id=UUID(org_id),
             version=1,
             instance='https://dev.sb.allogy.com',
-            nodes={'input': UUID('00000000-0000-0000-0000-000000000010')},
+            nodes={'input': UUID(DUMMY_NODE_UUID)},
             edges={},
             dependencies=resolved,
             pushed_at=datetime.now(UTC),
@@ -502,11 +517,9 @@ class TestLockfileRoundtripLive:
 
         # Dependencies should survive the round-trip
         assert restored.dependencies == resolved
-        assert restored.dependencies['agent:Data Analyst Agent'] == UUID(
-            'e0b3bdc6-9fcb-45ee-8833-26aa5cd1d2e0'
-        )
-        assert restored.dependencies['kb:standards'] == UUID('6c26048d-2f9c-4177-a126-f2ed8cd02a0e')
-        assert restored.dependencies['kb:industry'] == UUID('e70c07d8-8dbe-4833-9e42-a10dd0d21893')
+        assert restored.dependencies['agent:Data Analyst Agent'] == UUID(DATA_ANALYST_AGENT_UUID)
+        assert restored.dependencies['kb:standards'] == UUID(STANDARDS_KB_UUID)
+        assert restored.dependencies['kb:industry'] == UUID(INDUSTRY_KB_UUID)
 
     def test_resolved_deps_survive_disk_roundtrip(
         self, live_client: WorkflowClient, org_id: str, tmp_path: Path
@@ -529,7 +542,7 @@ class TestLockfileRoundtripLive:
         resolved = resolve_dependencies(workflow, live_client)
 
         lock = WorkflowLock(
-            workflow_id=UUID('00000000-0000-0000-0000-000000000001'),
+            workflow_id=UUID(DUMMY_WORKFLOW_UUID),
             organization_id=UUID(org_id),
             version=1,
             instance='https://dev.sb.allogy.com',
@@ -545,5 +558,5 @@ class TestLockfileRoundtripLive:
         assert restored.dependencies == resolved
         assert 'agent:Code Assistant Agent' in restored.dependencies
         assert restored.dependencies['agent:Code Assistant Agent'] == UUID(
-            '2792240d-07cf-4674-82be-9b71189bb286'
+            CODE_ASSISTANT_AGENT_UUID
         )

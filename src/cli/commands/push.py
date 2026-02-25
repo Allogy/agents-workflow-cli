@@ -111,13 +111,14 @@ def _resolve_agent(
     if cache_key in cache:
         return cache[cache_key]
 
-    # API lookup
-    result = client.find_agent_by_name(agent_name)
-    if result is not None:
-        return UUID(result['id'])
+    # API lookup — fetch the full list once for both matching and error messages
+    available = client.list_agents()
+    name_lower = agent_name.lower()
+    for agent in available:
+        if agent.get('name', '').lower() == name_lower:
+            return UUID(agent['id'])
 
     # Build helpful error with available alternatives
-    available = client.list_agents()
     names = [a.get('name', '(unnamed)') for a in available]
     if names:
         names_str = ', '.join(names)
@@ -157,13 +158,14 @@ def _resolve_knowledge_base(
     if cache_key in cache:
         return cache[cache_key]
 
-    # API lookup
-    result = client.find_knowledge_base_by_name(kb_name)
-    if result is not None:
-        return UUID(result['id'])
+    # API lookup — fetch the full list once for both matching and error messages
+    available = client.list_knowledge_bases()
+    name_lower = kb_name.lower()
+    for kb in available:
+        if kb.get('name', '').lower() == name_lower:
+            return UUID(kb['id'])
 
     # Build helpful error with available alternatives
-    available = client.list_knowledge_bases()
     names = [kb.get('name', '(unnamed)') for kb in available]
     if names:
         names_str = ', '.join(names)
@@ -203,7 +205,7 @@ def resolve_dependencies(
     """
     resolved: dict[str, UUID] = {}
     cache: dict[str, UUID] = {}
-    if existing_lock is not None and hasattr(existing_lock, 'dependencies'):
+    if existing_lock is not None:
         cache = existing_lock.dependencies or {}
 
     # Scan all nodes for agent and knowledge base references
