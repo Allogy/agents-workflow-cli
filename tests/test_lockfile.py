@@ -372,3 +372,145 @@ def test_workflow_lock_roundtrip_serialization(sample_lockfile: WorkflowLock):
     assert restored.nodes == sample_lockfile.nodes
     assert restored.edges == sample_lockfile.edges
     assert restored.pushed_at == sample_lockfile.pushed_at
+
+
+# ============================================================================
+# Dependencies Field Tests (RAG-950: Lockfile dependency caching)
+# ============================================================================
+
+
+class TestLockfileDependencies:
+    """Test the dependencies field on WorkflowLock."""
+
+    def test_dependencies_default_empty(self):
+        """Test that dependencies field defaults to empty dict."""
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            pushed_at=datetime.now(UTC),
+        )
+        assert lock.dependencies == {}
+
+    def test_dependencies_stores_agent_mappings(self):
+        """Test that dependencies can store agent name->UUID mappings."""
+        agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            dependencies={'agent:Invoice Agent': agent_uuid},
+            pushed_at=datetime.now(UTC),
+        )
+        assert lock.dependencies['agent:Invoice Agent'] == agent_uuid
+
+    def test_dependencies_stores_kb_mappings(self):
+        """Test that dependencies can store KB name->UUID mappings."""
+        kb_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            dependencies={'kb:Company Policies': kb_uuid},
+            pushed_at=datetime.now(UTC),
+        )
+        assert lock.dependencies['kb:Company Policies'] == kb_uuid
+
+    def test_dependencies_to_yaml_dict(self):
+        """Test dependencies serialization in to_yaml_dict."""
+        agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
+        kb_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            dependencies={
+                'agent:Invoice Agent': agent_uuid,
+                'kb:Company Policies': kb_uuid,
+            },
+            pushed_at=datetime.now(UTC),
+        )
+        data = lock.to_yaml_dict()
+        assert 'dependencies' in data
+        assert data['dependencies']['agent:Invoice Agent'] == str(agent_uuid)
+        assert data['dependencies']['kb:Company Policies'] == str(kb_uuid)
+
+    def test_dependencies_from_yaml_dict(self):
+        """Test dependencies deserialization from YAML dict."""
+        data = {
+            'workflow_id': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+            'organization_id': '9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d',
+            'version': 1,
+            'instance': 'https://api.example.com',
+            'nodes': {},
+            'edges': {},
+            'dependencies': {
+                'agent:Invoice Agent': '12345678-1234-1234-1234-123456789012',
+                'kb:Company Policies': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            },
+            'pushed_at': '2026-02-15T14:30:00+00:00',
+        }
+        lock = WorkflowLock.from_yaml_dict(data)
+        assert lock.dependencies['agent:Invoice Agent'] == UUID(
+            '12345678-1234-1234-1234-123456789012'
+        )
+        assert lock.dependencies['kb:Company Policies'] == UUID(
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        )
+
+    def test_dependencies_roundtrip(self):
+        """Test dependencies survive serialization round-trip."""
+        agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            dependencies={'agent:Test Agent': agent_uuid},
+            pushed_at=datetime.now(UTC),
+        )
+        data = lock.to_yaml_dict()
+        restored = WorkflowLock.from_yaml_dict(data)
+        assert restored.dependencies == lock.dependencies
+
+    def test_dependencies_backward_compat_no_field(self):
+        """Test that lockfiles without dependencies field can still be loaded."""
+        data = {
+            'workflow_id': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+            'organization_id': '9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d',
+            'version': 1,
+            'instance': 'https://api.example.com',
+            'nodes': {},
+            'edges': {},
+            'pushed_at': '2026-02-15T14:30:00+00:00',
+            # No 'dependencies' key at all
+        }
+        lock = WorkflowLock.from_yaml_dict(data)
+        assert lock.dependencies == {}
+
+    def test_dependencies_written_to_disk_and_read_back(self, tmp_path: Path):
+        """Test that dependencies survive write/read to actual YAML file."""
+        agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
+        kb_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+        lock = WorkflowLock(
+            workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
+            organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
+            version=1,
+            instance='https://api.example.com',
+            dependencies={
+                'agent:Test Agent': agent_uuid,
+                'kb:Test KB': kb_uuid,
+            },
+            pushed_at=datetime.now(UTC),
+        )
+
+        lockfile_path = tmp_path / 'test.workflow.lock'
+        write_lockfile(lockfile_path, lock)
+
+        restored = read_lockfile(lockfile_path)
+        assert restored.dependencies['agent:Test Agent'] == agent_uuid
+        assert restored.dependencies['kb:Test KB'] == kb_uuid

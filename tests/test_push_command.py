@@ -10,6 +10,7 @@ from workflow_models.wdf import EdgeDefinition, NodeDefinition, WorkflowDefiniti
 from cli.commands.push import (
     DependencyResolutionError,
     PushError,
+    _is_uuid,
     build_node_parameters,
     generate_node_layout,
     resolve_dependencies,
@@ -163,51 +164,49 @@ def test_resolve_dependencies_no_deps(simple_workflow, mock_client):
     """Test resolving workflow with no dependencies."""
     resolved = resolve_dependencies(simple_workflow, mock_client)
     assert resolved == {}
-    mock_client.find_agent_by_name.assert_not_called()
-    mock_client.find_knowledge_base_by_name.assert_not_called()
+    mock_client.list_agents.assert_not_called()
+    mock_client.list_knowledge_bases.assert_not_called()
 
 
 def test_resolve_dependencies_with_agent(workflow_with_agent, mock_client):
     """Test resolving workflow with agent reference."""
-    mock_client.find_agent_by_name.return_value = {
-        'id': '12345678-1234-1234-1234-123456789012',
-        'name': 'Test Agent',
-    }
+    mock_client.list_agents.return_value = [
+        {'id': '12345678-1234-1234-1234-123456789012', 'name': 'Test Agent'},
+    ]
 
     resolved = resolve_dependencies(workflow_with_agent, mock_client)
 
     assert 'agent:Test Agent' in resolved
     assert resolved['agent:Test Agent'] == UUID('12345678-1234-1234-1234-123456789012')
-    mock_client.find_agent_by_name.assert_called_once_with('Test Agent')
+    mock_client.list_agents.assert_called_once()
 
 
 def test_resolve_dependencies_with_kb(workflow_with_kb, mock_client):
     """Test resolving workflow with knowledge base reference."""
-    mock_client.find_knowledge_base_by_name.return_value = {
-        'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        'name': 'Test KB',
-    }
+    mock_client.list_knowledge_bases.return_value = [
+        {'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'name': 'Test KB'},
+    ]
 
     resolved = resolve_dependencies(workflow_with_kb, mock_client)
 
     assert 'kb:Test KB' in resolved
     assert resolved['kb:Test KB'] == UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
-    mock_client.find_knowledge_base_by_name.assert_called_once_with('Test KB')
+    mock_client.list_knowledge_bases.assert_called_once()
 
 
 def test_resolve_dependencies_agent_not_found(workflow_with_agent, mock_client):
     """Test error when agent cannot be resolved."""
-    mock_client.find_agent_by_name.return_value = None
+    mock_client.list_agents.return_value = []
 
-    with pytest.raises(DependencyResolutionError, match='Agent not found: Test Agent'):
+    with pytest.raises(DependencyResolutionError, match="Cannot resolve agent 'Test Agent'"):
         resolve_dependencies(workflow_with_agent, mock_client)
 
 
 def test_resolve_dependencies_kb_not_found(workflow_with_kb, mock_client):
     """Test error when knowledge base cannot be resolved."""
-    mock_client.find_knowledge_base_by_name.return_value = None
+    mock_client.list_knowledge_bases.return_value = []
 
-    with pytest.raises(DependencyResolutionError, match='Knowledge base not found: Test KB'):
+    with pytest.raises(DependencyResolutionError, match="Cannot resolve knowledge base 'Test KB'"):
         resolve_dependencies(workflow_with_kb, mock_client)
 
 
@@ -677,7 +676,7 @@ class TestWdfToApiPayloadParameters:
             exit='rag',
         )
         mock_client = MagicMock()
-        mock_client.find_knowledge_base_by_name.side_effect = [
+        mock_client.list_knowledge_bases.return_value = [
             {'id': '11111111-1111-1111-1111-111111111111', 'name': 'KB One'},
             {'id': '22222222-2222-2222-2222-222222222222', 'name': 'KB Two'},
         ]
@@ -685,4 +684,483 @@ class TestWdfToApiPayloadParameters:
         resolved = resolve_dependencies(workflow, mock_client)
         assert 'kb:KB One' in resolved
         assert 'kb:KB Two' in resolved
-        assert mock_client.find_knowledge_base_by_name.call_count == 2
+        assert resolved['kb:KB One'] == UUID('11111111-1111-1111-1111-111111111111')
+        assert resolved['kb:KB Two'] == UUID('22222222-2222-2222-2222-222222222222')
+
+
+# ============================================================================
+# UUID Passthrough Tests (RAG-950: Scenario "UUID references are passed through")
+# ============================================================================
+
+
+class TestIsUuid:
+    """Test the _is_uuid helper function."""
+
+    def test_valid_uuid_v4(self):
+        """Test that a standard UUID v4 string is detected."""
+        assert _is_uuid('5f6a7b8c-9d0e-1f2a-3b4c-5d6e7f8a9b0c') is True
+
+    def test_valid_uuid_all_zeros(self):
+        """Test that the nil UUID is detected."""
+        assert _is_uuid('00000000-0000-0000-0000-000000000000') is True
+
+    def test_human_readable_name(self):
+        """Test that human-readable names are not UUIDs."""
+        assert _is_uuid('Invoice Processing Agent') is False
+
+    def test_empty_string(self):
+        """Test that empty string is not a UUID."""
+        assert _is_uuid('') is False
+
+    def test_partial_uuid(self):
+        """Test that a partial UUID is not detected."""
+        assert _is_uuid('5f6a7b8c-9d0e') is False
+
+    def test_uuid_uppercase(self):
+        """Test that uppercase UUID is detected."""
+        assert _is_uuid('5F6A7B8C-9D0E-1F2A-3B4C-5D6E7F8A9B0C') is True
+
+
+class TestUuidPassthrough:
+    """Test that UUID references in agent_name/knowledge_base_name are passed through."""
+
+    def test_agent_name_with_uuid_skips_api_call(self, mock_client):
+        """Scenario: UUID references are passed through.
+
+        Given a node config has agent_name: "5f6a7b8c-9d0e-1f2a-3b4c-5d6e7f8a9b0c"
+        When push resolves dependencies
+        Then the UUID is used as-is (no API lookup)
+        """
+        agent_uuid_str = '5f6a7b8c-9d0e-1f2a-3b4c-5d6e7f8a9b0c'
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': agent_uuid_str},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        resolved = resolve_dependencies(workflow, mock_client)
+
+        assert f'agent:{agent_uuid_str}' in resolved
+        assert resolved[f'agent:{agent_uuid_str}'] == UUID(agent_uuid_str)
+        # Critically: no API call should be made
+        mock_client.list_agents.assert_not_called()
+
+    def test_kb_name_with_uuid_skips_api_call(self, mock_client):
+        """Scenario: UUID references are passed through for knowledge bases.
+
+        Given a node config has knowledge_base_name: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        When push resolves dependencies
+        Then the UUID is used as-is (no API lookup)
+        """
+        kb_uuid_str = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'retrieval': NodeDefinition.model_construct(
+                    type='retrieve',
+                    execution_mode='FLOW',
+                    label='KB Retrieval',
+                    config={'knowledge_base_name': kb_uuid_str},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='retrieval',
+        )
+
+        resolved = resolve_dependencies(workflow, mock_client)
+
+        assert f'kb:{kb_uuid_str}' in resolved
+        assert resolved[f'kb:{kb_uuid_str}'] == UUID(kb_uuid_str)
+        mock_client.list_knowledge_bases.assert_not_called()
+
+    def test_kb_names_list_with_uuids_skips_api_call(self, mock_client):
+        """Test that UUID references in knowledge_base_names list are passed through."""
+        kb_uuid1 = '11111111-1111-1111-1111-111111111111'
+        kb_uuid2 = '22222222-2222-2222-2222-222222222222'
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'rag': NodeDefinition.model_construct(
+                    type='rag_agent',
+                    execution_mode='MESSAGES',
+                    config={'knowledge_base_names': [kb_uuid1, kb_uuid2]},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='rag',
+        )
+
+        resolved = resolve_dependencies(workflow, mock_client)
+
+        assert f'kb:{kb_uuid1}' in resolved
+        assert f'kb:{kb_uuid2}' in resolved
+        assert resolved[f'kb:{kb_uuid1}'] == UUID(kb_uuid1)
+        assert resolved[f'kb:{kb_uuid2}'] == UUID(kb_uuid2)
+        mock_client.list_knowledge_bases.assert_not_called()
+
+    def test_mixed_uuid_and_name_references(self, mock_client):
+        """Test that a mix of UUID and name references works correctly."""
+        kb_uuid = '11111111-1111-1111-1111-111111111111'
+        kb_name = 'Company Policies'
+        resolved_kb_uuid = '22222222-2222-2222-2222-222222222222'
+
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'rag': NodeDefinition.model_construct(
+                    type='rag_agent',
+                    execution_mode='MESSAGES',
+                    config={'knowledge_base_names': [kb_uuid, kb_name]},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='rag',
+        )
+
+        mock_client.list_knowledge_bases.return_value = [
+            {'id': resolved_kb_uuid, 'name': kb_name},
+        ]
+
+        resolved = resolve_dependencies(workflow, mock_client)
+
+        # UUID should be passed through
+        assert resolved[f'kb:{kb_uuid}'] == UUID(kb_uuid)
+        # Name should be resolved via API
+        assert resolved[f'kb:{kb_name}'] == UUID(resolved_kb_uuid)
+        # Only the name should trigger an API call
+        mock_client.list_knowledge_bases.assert_called_once()
+
+
+# ============================================================================
+# Helpful Error Messages (RAG-950: Scenario "Missing reference shows helpful error")
+# ============================================================================
+
+
+class TestDependencyResolutionErrors:
+    """Test that missing dependencies show helpful error messages with alternatives."""
+
+    def test_agent_not_found_lists_available_agents(self, mock_client):
+        """Scenario: Missing reference shows helpful error.
+
+        Given a node references an agent that doesn't exist
+        When push resolves dependencies
+        Then the error says: "Cannot resolve agent 'X'. Available agents: A, B, C"
+        And the push is aborted before any API calls
+        """
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': 'Nonexistent Agent'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        mock_client.list_agents.return_value = [
+            {'id': '111', 'name': 'Invoice Agent'},
+            {'id': '222', 'name': 'Support Agent'},
+            {'id': '333', 'name': 'Data Agent'},
+        ]
+
+        with pytest.raises(DependencyResolutionError, match='Cannot resolve agent') as exc_info:
+            resolve_dependencies(workflow, mock_client)
+
+        error_msg = str(exc_info.value)
+        assert 'Nonexistent Agent' in error_msg
+        assert 'Invoice Agent' in error_msg
+        assert 'Support Agent' in error_msg
+        assert 'Data Agent' in error_msg
+
+    def test_kb_not_found_lists_available_kbs(self, mock_client):
+        """Scenario: Missing KB reference shows helpful error with alternatives."""
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'retrieval': NodeDefinition.model_construct(
+                    type='retrieve',
+                    execution_mode='FLOW',
+                    label='KB Retrieval',
+                    config={'knowledge_base_name': 'Nonexistent KB'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='retrieval',
+        )
+
+        mock_client.list_knowledge_bases.return_value = [
+            {'id': '111', 'name': 'Company Policies'},
+            {'id': '222', 'name': 'Product Docs'},
+        ]
+
+        with pytest.raises(
+            DependencyResolutionError, match='Cannot resolve knowledge base'
+        ) as exc_info:
+            resolve_dependencies(workflow, mock_client)
+
+        error_msg = str(exc_info.value)
+        assert 'Nonexistent KB' in error_msg
+        assert 'Company Policies' in error_msg
+        assert 'Product Docs' in error_msg
+
+    def test_agent_not_found_no_agents_available(self, mock_client):
+        """Test error message when no agents exist at all."""
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': 'Nonexistent Agent'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        mock_client.list_agents.return_value = []
+
+        with pytest.raises(DependencyResolutionError, match='Cannot resolve agent') as exc_info:
+            resolve_dependencies(workflow, mock_client)
+
+        error_msg = str(exc_info.value)
+        assert 'Nonexistent Agent' in error_msg
+        assert 'No agents available' in error_msg
+
+
+# ============================================================================
+# Lockfile Dependency Caching (RAG-950: Scenario "Resolved mappings are cached in lockfile")
+# ============================================================================
+
+
+class TestLockfileDependencyCache:
+    """Test that resolved dependencies use lockfile cache."""
+
+    def test_cached_agent_skips_api_call(self, mock_client):
+        """Scenario: Resolved mappings are cached in lockfile.
+
+        Given an agent name was resolved on a previous push
+        When the lockfile exists with the cached UUID
+        Then subsequent pushes use the cached UUID (with optional re-validation)
+        """
+        from cli.lockfile import WorkflowLock
+
+        agent_uuid = UUID('12345678-1234-1234-1234-123456789012')
+        existing_lock = WorkflowLock.model_construct(
+            workflow_id=UUID('99999999-9999-9999-9999-999999999999'),
+            organization_id=UUID('88888888-8888-8888-8888-888888888888'),
+            version=1,
+            instance='https://api.example.com',
+            nodes={},
+            edges={},
+            dependencies={'agent:Test Agent': agent_uuid},
+            pushed_at=None,
+        )
+
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': 'Test Agent'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        resolved = resolve_dependencies(workflow, mock_client, existing_lock=existing_lock)
+
+        assert resolved['agent:Test Agent'] == agent_uuid
+        # No API call should be made — used cached value
+        mock_client.list_agents.assert_not_called()
+
+    def test_cached_kb_skips_api_call(self, mock_client):
+        """Test that cached KB mapping skips API call."""
+        from cli.lockfile import WorkflowLock
+
+        kb_uuid = UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+        existing_lock = WorkflowLock.model_construct(
+            workflow_id=UUID('99999999-9999-9999-9999-999999999999'),
+            organization_id=UUID('88888888-8888-8888-8888-888888888888'),
+            version=1,
+            instance='https://api.example.com',
+            nodes={},
+            edges={},
+            dependencies={'kb:Test KB': kb_uuid},
+            pushed_at=None,
+        )
+
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'retrieval': NodeDefinition.model_construct(
+                    type='retrieve',
+                    execution_mode='FLOW',
+                    label='KB Retrieval',
+                    config={'knowledge_base_name': 'Test KB'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='retrieval',
+        )
+
+        resolved = resolve_dependencies(workflow, mock_client, existing_lock=existing_lock)
+
+        assert resolved['kb:Test KB'] == kb_uuid
+        mock_client.list_knowledge_bases.assert_not_called()
+
+    def test_uncached_dependency_still_calls_api(self, mock_client):
+        """Test that dependencies not in cache are resolved via API."""
+        from cli.lockfile import WorkflowLock
+
+        existing_lock = WorkflowLock.model_construct(
+            workflow_id=UUID('99999999-9999-9999-9999-999999999999'),
+            organization_id=UUID('88888888-8888-8888-8888-888888888888'),
+            version=1,
+            instance='https://api.example.com',
+            nodes={},
+            edges={},
+            dependencies={},  # Empty cache
+            pushed_at=None,
+        )
+
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': 'New Agent'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        mock_client.list_agents.return_value = [
+            {'id': '12345678-1234-1234-1234-123456789012', 'name': 'New Agent'},
+        ]
+
+        resolved = resolve_dependencies(workflow, mock_client, existing_lock=existing_lock)
+
+        assert resolved['agent:New Agent'] == UUID('12345678-1234-1234-1234-123456789012')
+        mock_client.list_agents.assert_called_once()
+
+    def test_no_lockfile_still_resolves_via_api(self, mock_client):
+        """Test that resolve_dependencies works without a lockfile (existing_lock=None)."""
+        workflow = WorkflowDefinition.model_construct(
+            name='Test',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition.model_construct(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    label='My Agent',
+                    config={'agent_name': 'Test Agent'},
+                ),
+            },
+            edges=[],
+            entry='input',
+            exit='agent',
+        )
+
+        mock_client.list_agents.return_value = [
+            {'id': '12345678-1234-1234-1234-123456789012', 'name': 'Test Agent'},
+        ]
+
+        resolved = resolve_dependencies(workflow, mock_client, existing_lock=None)
+
+        assert resolved['agent:Test Agent'] == UUID('12345678-1234-1234-1234-123456789012')
+        mock_client.list_agents.assert_called_once()

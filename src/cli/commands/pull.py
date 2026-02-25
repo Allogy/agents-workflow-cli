@@ -224,6 +224,11 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
         'schema': None,
         'model': None,
     },
+    'RAG_AGENT': {
+        'agent_id': 'agentId',
+        'knowledge_base_ids': 'knowledgeBaseIds',
+        'primaryInput': None,
+    },
     'RETRIEVE': {
         'enable_reranking': 'enableReranking',
         'include_metadata': 'includeMetadata',
@@ -244,6 +249,34 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
 }
 
 
+def _is_empty_ref(value: Any) -> bool:
+    """Return True if *value* is an empty dependency reference.
+
+    Dependency-reference fields (``agentId``, ``knowledgeBaseId``,
+    ``knowledgeBasesOverride``, etc.) can be stored as ``None``, ``""``,
+    or ``[]`` in the database when no agent / knowledge-base is linked.
+    These empty sentinels carry no useful information and should be
+    omitted from the pulled WDF config so that the YAML stays clean and
+    the push path can treat their absence as "not configured".
+    """
+    return value is None or value == '' or value == []
+
+
+# Fields that represent dependency references (agent / KB links).
+# When these come back as None / '' / [] from the API they should be
+# dropped rather than written into the WDF config.
+_DEPENDENCY_REF_FIELDS: set[str] = {
+    # camelCase (frontend / parameters)
+    'agentId',
+    'knowledgeBasesOverride',
+    'knowledgeBaseId',
+    # snake_case (CLI-pushed / config)
+    'agent_id',
+    'knowledge_base_id',
+    'knowledge_base_ids',
+}
+
+
 def extract_node_config(
     config_type: str,
     parameters: dict[str, Any],
@@ -257,6 +290,10 @@ def extract_node_config(
 
     This function merges them into a single WDF-compatible config dict,
     using parameters as the primary source and config as fallback.
+
+    Dependency-reference fields (agentId, knowledgeBaseId, etc.) that are
+    ``None``, empty strings, or empty lists are silently dropped — they
+    carry no useful information and would produce noisy YAML output.
 
     Args:
         config_type: Uppercase config type (e.g., 'RAG_AGENT').
@@ -272,8 +309,12 @@ def extract_node_config(
     param_fields = _NODE_TYPE_PARAM_FIELDS.get(config_type, {})
     for param_key, wdf_key in param_fields.items():
         if param_key in parameters:
+            value = parameters[param_key]
             target_key = wdf_key if wdf_key is not None else param_key
-            result[target_key] = parameters[param_key]
+            # Drop empty dependency references (None / '' / [])
+            if param_key in _DEPENDENCY_REF_FIELDS and _is_empty_ref(value):
+                continue
+            result[target_key] = value
 
     # Step 2: Fill gaps from config (fallback source)
     config_fields = _NODE_TYPE_CONFIG_FIELDS.get(config_type, {})
@@ -281,7 +322,11 @@ def extract_node_config(
         target_key = wdf_key if wdf_key is not None else config_key
         # Only fill if not already set from parameters
         if target_key not in result and config_key in config:
-            result[target_key] = config[config_key]
+            value = config[config_key]
+            # Drop empty dependency references (None / '' / [])
+            if config_key in _DEPENDENCY_REF_FIELDS and _is_empty_ref(value):
+                continue
+            result[target_key] = value
 
     # Step 3: If no typed fields matched at all, fall back to merging
     # config dict directly (for unknown/new node types or CLI-pushed workflows
@@ -478,6 +523,14 @@ def reverse_resolve_dependencies(
             except (KeyError, ValueError, TypeError):
                 pass
 
+        # Warn about agent UUIDs that could not be resolved
+        unresolved_agents = agent_uuids - set(agent_map.keys())
+        for agent_uuid in unresolved_agents:
+            console.print(
+                f'  [yellow]Warning:[/yellow] Agent {agent_uuid} not found '
+                f'— it may belong to another organization or have been deleted'
+            )
+
     # Build KB UUID -> name map
     kb_map: dict[UUID, str] = {}
     if kb_uuids:
@@ -489,6 +542,14 @@ def reverse_resolve_dependencies(
                     kb_map[kb_uuid] = kb['name']
             except (KeyError, ValueError, TypeError):
                 pass
+
+        # Warn about KB UUIDs that could not be resolved
+        unresolved_kbs = kb_uuids - set(kb_map.keys())
+        for kb_uuid in unresolved_kbs:
+            console.print(
+                f'  [yellow]Warning:[/yellow] Knowledge base {kb_uuid} not found '
+                f'— it may belong to another organization or have been deleted'
+            )
 
     return agent_map, kb_map
 

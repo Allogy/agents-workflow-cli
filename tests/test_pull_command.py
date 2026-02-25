@@ -1836,3 +1836,339 @@ class TestApiResponseToWdfWithParameters:
         # type should be lowercase
         assert node.type == 'plain_txt_input'
         assert type(node.type) is str
+
+
+# ============================================================================
+# Extract Node Config — Empty Dependency References (agentId / knowledgeBaseIds)
+# ============================================================================
+
+
+class TestExtractNodeConfigEmptyDependencies:
+    """Test that extract_node_config drops empty dependency references.
+
+    When the frontend saves a node without a linked agent or knowledge base
+    the database stores ``None``, ``''``, or ``[]`` for the reference fields.
+    These empty sentinels should be omitted from the pulled WDF config so that
+    the YAML stays clean.
+    """
+
+    # --- agentId ---
+
+    def test_agent_node_skips_none_agent_id(self):
+        """AGENT node with agentId=None should not include agentId in result."""
+        parameters = {
+            'type': 'agent',
+            'agentId': None,
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        result = extract_node_config('AGENT', parameters, {})
+        assert 'agentId' not in result
+        # Non-dependency fields should still be extracted
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert result['system_prompt'] == 'You are helpful.'
+
+    def test_agent_node_skips_empty_string_agent_id(self):
+        """AGENT node with agentId='' should not include agentId in result."""
+        parameters = {
+            'type': 'agent',
+            'agentId': '',
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        result = extract_node_config('AGENT', parameters, {})
+        assert 'agentId' not in result
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+
+    def test_rag_agent_skips_none_agent_id(self):
+        """RAG_AGENT node with agentId=None should not include agentId in result."""
+        kb_id = str(uuid4())
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': None,
+            'knowledgeBasesOverride': [kb_id],
+            'primaryInput': '{{input_1.output.text}}',
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert 'agentId' not in result
+        # Other fields should still be present
+        assert result['knowledgeBaseIds'] == [kb_id]
+        assert result['primaryInput'] == '{{input_1.output.text}}'
+
+    def test_rag_agent_skips_empty_string_agent_id(self):
+        """RAG_AGENT node with agentId='' should not include agentId in result."""
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': '',
+            'knowledgeBasesOverride': [str(uuid4())],
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert 'agentId' not in result
+
+    # --- knowledgeBasesOverride / knowledgeBaseIds ---
+
+    def test_rag_agent_skips_empty_list_knowledge_bases(self):
+        """RAG_AGENT with knowledgeBasesOverride=[] should not include knowledgeBaseIds."""
+        agent_id = str(uuid4())
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': agent_id,
+            'knowledgeBasesOverride': [],
+            'primaryInput': '{{input_1.output.text}}',
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert 'knowledgeBaseIds' not in result
+        # agentId with a valid value should still be present
+        assert result['agentId'] == agent_id
+
+    def test_rag_agent_skips_none_knowledge_bases(self):
+        """RAG_AGENT with knowledgeBasesOverride=None should not include knowledgeBaseIds."""
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': str(uuid4()),
+            'knowledgeBasesOverride': None,
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert 'knowledgeBaseIds' not in result
+
+    def test_retrieve_skips_none_knowledge_base_id(self):
+        """RETRIEVE with knowledgeBaseId=None should not include knowledgeBaseId."""
+        parameters = {
+            'type': 'retrieve',
+            'knowledgeBaseId': None,
+            'topK': 5,
+        }
+        result = extract_node_config('RETRIEVE', parameters, {})
+        assert 'knowledgeBaseId' not in result
+        assert result['topK'] == 5
+
+    def test_retrieve_skips_empty_list_knowledge_base_id(self):
+        """RETRIEVE with knowledgeBaseId=[] should not include knowledgeBaseId."""
+        parameters = {
+            'type': 'retrieve',
+            'knowledgeBaseId': [],
+            'topK': 5,
+        }
+        result = extract_node_config('RETRIEVE', parameters, {})
+        assert 'knowledgeBaseId' not in result
+
+    def test_retrieve_skips_empty_string_knowledge_base_id(self):
+        """RETRIEVE with knowledgeBaseId='' should not include knowledgeBaseId."""
+        parameters = {
+            'type': 'retrieve',
+            'knowledgeBaseId': '',
+            'topK': 5,
+        }
+        result = extract_node_config('RETRIEVE', parameters, {})
+        assert 'knowledgeBaseId' not in result
+
+    # --- Config fallback with empty refs ---
+
+    def test_agent_config_fallback_skips_none_agent_id(self):
+        """AGENT config fallback with agent_id=None should not include agentId."""
+        parameters: dict = {}
+        config = {
+            'agent_id': None,
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        result = extract_node_config('AGENT', parameters, config)
+        assert 'agentId' not in result
+        assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+
+    def test_agent_config_fallback_skips_empty_string_agent_id(self):
+        """AGENT config fallback with agent_id='' should not include agentId."""
+        parameters: dict = {}
+        config = {
+            'agent_id': '',
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        result = extract_node_config('AGENT', parameters, config)
+        assert 'agentId' not in result
+
+    # --- Valid values still work ---
+
+    def test_valid_agent_id_is_preserved(self):
+        """A valid UUID agentId should still be extracted."""
+        agent_id = str(uuid4())
+        parameters = {
+            'type': 'agent',
+            'agentId': agent_id,
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        result = extract_node_config('AGENT', parameters, {})
+        assert result['agentId'] == agent_id
+
+    def test_valid_knowledge_bases_list_is_preserved(self):
+        """A non-empty knowledgeBasesOverride list should still be extracted."""
+        kb_ids = [str(uuid4()), str(uuid4())]
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': str(uuid4()),
+            'knowledgeBasesOverride': kb_ids,
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert result['knowledgeBaseIds'] == kb_ids
+
+    # --- Non-dependency None values still work ---
+
+    def test_none_temperature_is_preserved(self):
+        """None for non-dependency fields (temperature) should still be included."""
+        parameters = {
+            'type': 'agent',
+            'agentId': str(uuid4()),
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+            'temperature': None,
+            'maxTokens': None,
+        }
+        result = extract_node_config('AGENT', parameters, {})
+        assert 'temperature' in result
+        assert result['temperature'] is None
+        assert 'maxTokens' in result
+        assert result['maxTokens'] is None
+
+
+# ============================================================================
+# RAG_AGENT Config Fallback Tests
+# ============================================================================
+
+
+class TestRagAgentConfigFallback:
+    """Test that RAG_AGENT has config fallback mappings for CLI-pushed workflows."""
+
+    def test_rag_agent_from_config_fallback(self):
+        """RAG_AGENT should extract agent_id and knowledge_base_ids from config dict."""
+        agent_id = str(uuid4())
+        kb_ids = [str(uuid4()), str(uuid4())]
+        parameters: dict = {}
+        config = {
+            'agent_id': agent_id,
+            'knowledge_base_ids': kb_ids,
+            'primaryInput': '{{input_1.output.text}}',
+        }
+        result = extract_node_config('RAG_AGENT', parameters, config)
+        # agent_id -> agentId renaming
+        assert result['agentId'] == agent_id
+        # knowledge_base_ids -> knowledgeBaseIds renaming
+        assert result['knowledgeBaseIds'] == kb_ids
+        assert result['primaryInput'] == '{{input_1.output.text}}'
+
+    def test_rag_agent_parameters_over_config(self):
+        """RAG_AGENT parameters should take priority over config fallback."""
+        param_agent = str(uuid4())
+        config_agent = str(uuid4())
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': param_agent,
+            'knowledgeBasesOverride': [str(uuid4())],
+        }
+        config = {
+            'agent_id': config_agent,
+            'knowledge_base_ids': [str(uuid4())],
+        }
+        result = extract_node_config('RAG_AGENT', parameters, config)
+        # parameters value should win
+        assert result['agentId'] == param_agent
+
+    def test_rag_agent_config_fallback_fills_gaps(self):
+        """RAG_AGENT should use config fallback only for fields missing in parameters."""
+        param_agent = str(uuid4())
+        config_kb_ids = [str(uuid4())]
+        parameters = {
+            'type': 'ragAgent',
+            'agentId': param_agent,
+            # knowledgeBasesOverride intentionally missing from parameters
+        }
+        config = {
+            'knowledge_base_ids': config_kb_ids,
+        }
+        result = extract_node_config('RAG_AGENT', parameters, config)
+        assert result['agentId'] == param_agent
+        assert result['knowledgeBaseIds'] == config_kb_ids
+
+
+# ============================================================================
+# Reverse Resolve — Warning on Unresolved UUIDs
+# ============================================================================
+
+
+class TestReverseResolveWarnings:
+    """Test that reverse_resolve_dependencies warns about unresolved UUIDs."""
+
+    def test_warns_on_unresolved_agent_uuid(self, mock_knowledge_bases, capsys):
+        """Should warn when an agent UUID is not found in list_agents response."""
+        unknown_agent = uuid4()
+        nodes = [
+            SimpleNamespace(
+                config_type='AGENT',
+                config={},
+                parameters={
+                    'agentId': str(unknown_agent),
+                },
+            ),
+        ]
+
+        mock_client = MagicMock()
+        # Return agents that don't include the referenced UUID
+        mock_client.list_agents.return_value = [
+            {'id': str(uuid4()), 'name': 'Some Other Agent'},
+        ]
+        mock_client.list_knowledge_bases.return_value = mock_knowledge_bases
+
+        agent_map, _ = reverse_resolve_dependencies(nodes, mock_client)
+        assert unknown_agent not in agent_map
+
+        # The warning should have been printed via rich console
+        captured = capsys.readouterr()
+        assert str(unknown_agent) in captured.out
+        assert 'not found' in captured.out
+
+    def test_warns_on_unresolved_kb_uuid(self, mock_agents, capsys):
+        """Should warn when a KB UUID is not found in list_knowledge_bases response."""
+        unknown_kb = uuid4()
+        nodes = [
+            SimpleNamespace(
+                config_type='RETRIEVE',
+                config={},
+                parameters={
+                    'knowledgeBaseId': str(unknown_kb),
+                },
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents
+        # Return KBs that don't include the referenced UUID
+        mock_client.list_knowledge_bases.return_value = [
+            {'id': str(uuid4()), 'name': 'Some Other KB'},
+        ]
+
+        _, kb_map = reverse_resolve_dependencies(nodes, mock_client)
+        assert unknown_kb not in kb_map
+
+        captured = capsys.readouterr()
+        assert str(unknown_kb) in captured.out
+        assert 'not found' in captured.out
+
+    def test_no_warning_when_all_resolved(self, mock_agents, mock_knowledge_bases, capsys):
+        """Should not warn when all UUIDs are resolved successfully."""
+        nodes = [
+            SimpleNamespace(
+                config_type='AGENT',
+                config={},
+                parameters={'agentId': str(AGENT_UUID)},
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = mock_knowledge_bases
+
+        agent_map, _ = reverse_resolve_dependencies(nodes, mock_client)
+        assert AGENT_UUID in agent_map
+
+        captured = capsys.readouterr()
+        assert 'not found' not in captured.out

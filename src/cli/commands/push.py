@@ -39,6 +39,25 @@ console = Console()
 # Regex for matching slug-based variable references like {{file_upload_1.output.text}}
 _SLUG_REFERENCE_RE = re.compile(r'\{\{([a-z0-9][a-z0-9_-]*)')
 
+# Regex for detecting UUID strings (v1-v5 and nil UUID)
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+
+
+def _is_uuid(value: str) -> bool:
+    """Check whether a string looks like a UUID.
+
+    Uses a regex check rather than UUID() constructor to avoid false positives
+    from non-standard UUID-like strings that UUID() might coerce.
+
+    Args:
+        value: String to check.
+
+    Returns:
+        True if the string matches the UUID format, False otherwise.
+    """
+    return bool(_UUID_RE.match(value))
+
+
 # Maps WDF node type to the ``type`` field value expected in backend parameters
 _WDF_TYPE_TO_PARAMS_TYPE: dict[str, str] = {
     'plain_txt_input': 'plainTextInput',
@@ -62,21 +81,132 @@ class DependencyResolutionError(PushError):
     """Raised when a dependency (agent/KB) cannot be resolved."""
 
 
-def resolve_dependencies(workflow: WorkflowDefinition, client: WorkflowClient) -> dict[str, UUID]:
+def _resolve_agent(
+    agent_name: str,
+    client: WorkflowClient,
+    cache: dict[str, UUID],
+) -> UUID:
+    """Resolve a single agent reference to a UUID.
+
+    If the value is already a UUID, returns it directly.
+    Otherwise, checks the cache, then falls back to an API lookup.
+
+    Args:
+        agent_name: Agent name or UUID string from the WDF config.
+        client: WorkflowClient for API lookups.
+        cache: Existing dependency cache (from lockfile).
+
+    Returns:
+        The resolved UUID.
+
+    Raises:
+        DependencyResolutionError: If the agent cannot be resolved.
+    """
+    # UUID passthrough: if it looks like a UUID, use as-is
+    if _is_uuid(agent_name):
+        return UUID(agent_name)
+
+    # Check lockfile cache
+    cache_key = f'agent:{agent_name}'
+    if cache_key in cache:
+        return cache[cache_key]
+
+    # API lookup — fetch the full list once for both matching and error messages
+    available = client.list_agents()
+    name_lower = agent_name.lower()
+    for agent in available:
+        if agent.get('name', '').lower() == name_lower:
+            return UUID(agent['id'])
+
+    # Build helpful error with available alternatives
+    names = [a.get('name', '(unnamed)') for a in available]
+    if names:
+        names_str = ', '.join(names)
+        msg = f"Cannot resolve agent '{agent_name}'. Available agents: {names_str}"
+    else:
+        msg = f"Cannot resolve agent '{agent_name}'. No agents available in this organization."
+    raise DependencyResolutionError(msg)
+
+
+def _resolve_knowledge_base(
+    kb_name: str,
+    client: WorkflowClient,
+    cache: dict[str, UUID],
+) -> UUID:
+    """Resolve a single knowledge base reference to a UUID.
+
+    If the value is already a UUID, returns it directly.
+    Otherwise, checks the cache, then falls back to an API lookup.
+
+    Args:
+        kb_name: Knowledge base name or UUID string from the WDF config.
+        client: WorkflowClient for API lookups.
+        cache: Existing dependency cache (from lockfile).
+
+    Returns:
+        The resolved UUID.
+
+    Raises:
+        DependencyResolutionError: If the knowledge base cannot be resolved.
+    """
+    # UUID passthrough: if it looks like a UUID, use as-is
+    if _is_uuid(kb_name):
+        return UUID(kb_name)
+
+    # Check lockfile cache
+    cache_key = f'kb:{kb_name}'
+    if cache_key in cache:
+        return cache[cache_key]
+
+    # API lookup — fetch the full list once for both matching and error messages
+    available = client.list_knowledge_bases()
+    name_lower = kb_name.lower()
+    for kb in available:
+        if kb.get('name', '').lower() == name_lower:
+            return UUID(kb['id'])
+
+    # Build helpful error with available alternatives
+    names = [kb.get('name', '(unnamed)') for kb in available]
+    if names:
+        names_str = ', '.join(names)
+        msg = f"Cannot resolve knowledge base '{kb_name}'. Available knowledge bases: {names_str}"
+    else:
+        msg = (
+            f"Cannot resolve knowledge base '{kb_name}'. "
+            'No knowledge bases available in this organization.'
+        )
+    raise DependencyResolutionError(msg)
+
+
+def resolve_dependencies(
+    workflow: WorkflowDefinition,
+    client: WorkflowClient,
+    existing_lock: WorkflowLock | None = None,
+) -> dict[str, UUID]:
     """Resolve agent and KB names to UUIDs.
+
+    Supports three resolution strategies (checked in order):
+    1. **UUID passthrough** — if the value looks like a UUID, use as-is.
+    2. **Lockfile cache** — if an ``existing_lock`` is provided and contains
+       a cached mapping, use the cached UUID without an API call.
+    3. **API lookup** — query the platform API to resolve by name.
 
     Args:
         workflow: The WorkflowDefinition with node configs referencing names.
         client: WorkflowClient for API lookups.
+        existing_lock: Optional existing lockfile with cached dependency mappings.
 
     Returns:
         Dictionary mapping reference names to UUIDs.
-        Keys are in the format 'agent:{name}' or 'kb:{name}'.
+        Keys are in the format ``'agent:{name}'`` or ``'kb:{name}'``.
 
     Raises:
         DependencyResolutionError: If any dependency cannot be resolved.
     """
     resolved: dict[str, UUID] = {}
+    cache: dict[str, UUID] = {}
+    if existing_lock is not None:
+        cache = existing_lock.dependencies or {}
 
     # Scan all nodes for agent and knowledge base references
     for _node_slug, node_def in workflow.nodes.items():
@@ -90,10 +220,7 @@ def resolve_dependencies(workflow: WorkflowDefinition, client: WorkflowClient) -
 
             key = f'agent:{agent_name}'
             if key not in resolved:
-                result = client.find_agent_by_name(agent_name)
-                if result is None:
-                    raise DependencyResolutionError(f'Agent not found: {agent_name}')
-                resolved[key] = UUID(result['id'])
+                resolved[key] = _resolve_agent(agent_name, client, cache)
 
         # Check for knowledge_base_name in config
         if 'knowledge_base_name' in config:
@@ -103,10 +230,7 @@ def resolve_dependencies(workflow: WorkflowDefinition, client: WorkflowClient) -
 
             key = f'kb:{kb_name}'
             if key not in resolved:
-                result = client.find_knowledge_base_by_name(kb_name)
-                if result is None:
-                    raise DependencyResolutionError(f'Knowledge base not found: {kb_name}')
-                resolved[key] = UUID(result['id'])
+                resolved[key] = _resolve_knowledge_base(kb_name, client, cache)
 
         # Check for knowledge_base_names (list) in config
         if 'knowledge_base_names' in config:
@@ -115,10 +239,7 @@ def resolve_dependencies(workflow: WorkflowDefinition, client: WorkflowClient) -
                     continue
                 key = f'kb:{kb_name}'
                 if key not in resolved:
-                    result = client.find_knowledge_base_by_name(kb_name)
-                    if result is None:
-                        raise DependencyResolutionError(f'Knowledge base not found: {kb_name}')
-                    resolved[key] = UUID(result['id'])
+                    resolved[key] = _resolve_knowledge_base(kb_name, client, cache)
 
     return resolved
 
@@ -593,7 +714,7 @@ def push_workflow(
     console.print('[dim]Resolving dependencies...[/dim]', end=' ')
     with WorkflowClient.from_config(config) as client:
         try:
-            resolved_deps = resolve_dependencies(workflow, client)
+            resolved_deps = resolve_dependencies(workflow, client, existing_lock=existing_lock)
         except DependencyResolutionError as e:
             console.print('[bold red]failed[/bold red]')
             raise PushError(str(e)) from e
@@ -629,6 +750,7 @@ def push_workflow(
             organization_id=UUID(str(response.workflow.organization_id)),
             version=1,
             instance=config.host or '',
+            dependencies=resolved_deps,
             pushed_at=datetime.now(UTC),
         )
 
