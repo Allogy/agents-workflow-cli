@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from rich.console import Console
 
 from cli.client import WorkflowClient
 from cli.lockfile import load_lockfile
+from cli.sse import SSEEvent, parse_sse_line
 
 console = Console()
 
@@ -174,3 +176,74 @@ def run_polling(
 
         if poll_interval > 0:
             time.sleep(poll_interval)
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming execution
+# ---------------------------------------------------------------------------
+
+_SSE_TERMINAL_EVENTS = {'RUN_FINISHED', 'RUN_ERROR'}
+_SSE_HITL_EVENTS = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
+
+
+def format_sse_event(event: SSEEvent) -> str:
+    """Format an SSE event for console display.
+
+    Args:
+        event: Parsed SSE event.
+
+    Returns:
+        Formatted string for Rich console output.
+    """
+    t = event.event_type
+    node_id = event.data.get('node_id', '')
+    step_type = event.data.get('step_type', '')
+
+    if t == 'RUN_STARTED':
+        return '[green]▶ RUN_STARTED[/green]'
+    if t == 'STEP_STARTED':
+        suffix = f' ({step_type})' if step_type else ''
+        return f'[blue]⏳ STEP_STARTED[/blue]  {node_id}{suffix}'
+    if t == 'STEP_FINISHED':
+        return f'[green]✓ STEP_FINISHED[/green]  {node_id}'
+    if t == 'STEP_ERROR':
+        error = event.data.get('error', 'unknown error')
+        return f'[red]✗ STEP_ERROR[/red]  {node_id}: {error}'
+    if t == 'WAITING_FOR_REVIEW':
+        return f'[yellow]⏸ WAITING_FOR_REVIEW[/yellow] at {node_id}'
+    if t == 'WAITING_FOR_INPUT':
+        return f'[yellow]⏸ WAITING_FOR_INPUT[/yellow] at {node_id}'
+    if t == 'RUN_FINISHED':
+        return '[green]✓ RUN_FINISHED[/green]'
+    if t == 'RUN_ERROR':
+        error = event.data.get('error', 'unknown error')
+        return f'[red]✗ RUN_ERROR[/red]: {error}'
+    if t == 'REVIEW_COMPLETE':
+        return f'[green]✓ REVIEW_COMPLETE[/green]  {node_id}'
+
+    return f'[dim]{t}[/dim]  {node_id}'
+
+
+def run_streaming(lines: Iterator[str]) -> str:
+    """Process SSE event lines until terminal or HITL event.
+
+    Args:
+        lines: Iterator of raw SSE lines (from httpx iter_lines or test data).
+
+    Returns:
+        Final event type string.
+    """
+    last_event_type = 'UNKNOWN'
+
+    for line in lines:
+        event = parse_sse_line(line)
+        if event is None:
+            continue
+
+        console.print(format_sse_event(event))
+        last_event_type = event.event_type
+
+        if last_event_type in _SSE_TERMINAL_EVENTS or last_event_type in _SSE_HITL_EVENTS:
+            return last_event_type
+
+    return last_event_type

@@ -9,7 +9,14 @@ from uuid import UUID
 
 import pytest
 
-from cli.commands.run import parse_input_arg, resolve_workflow_id, run_polling
+from cli.commands.run import (
+    format_sse_event,
+    parse_input_arg,
+    resolve_workflow_id,
+    run_polling,
+    run_streaming,
+)
+from cli.sse import SSEEvent
 
 # ---------------------------------------------------------------------------
 # Input parsing tests
@@ -151,3 +158,69 @@ class TestRunPolling:
 
         result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
         assert result == 'WAITING_FOR_INPUT'
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming tests
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSseEvent:
+    def test_run_started(self) -> None:
+        event = SSEEvent(event_type='RUN_STARTED', data={'type': 'RUN_STARTED'})
+        line = format_sse_event(event)
+        assert 'RUN_STARTED' in line
+
+    def test_step_started(self) -> None:
+        event = SSEEvent(
+            event_type='STEP_STARTED',
+            data={'type': 'STEP_STARTED', 'node_id': 'extract', 'step_type': 'LLM_CALL'},
+        )
+        line = format_sse_event(event)
+        assert 'extract' in line
+
+    def test_step_finished(self) -> None:
+        event = SSEEvent(
+            event_type='STEP_FINISHED',
+            data={'type': 'STEP_FINISHED', 'node_id': 'extract'},
+        )
+        line = format_sse_event(event)
+        assert 'extract' in line
+
+    def test_waiting_for_review(self) -> None:
+        event = SSEEvent(
+            event_type='WAITING_FOR_REVIEW',
+            data={'type': 'WAITING_FOR_REVIEW', 'node_id': 'review1'},
+        )
+        line = format_sse_event(event)
+        assert 'WAITING_FOR_REVIEW' in line
+
+    def test_run_error(self) -> None:
+        event = SSEEvent(
+            event_type='RUN_ERROR',
+            data={'type': 'RUN_ERROR', 'error': 'Something broke'},
+        )
+        line = format_sse_event(event)
+        assert 'RUN_ERROR' in line
+
+
+class TestRunStreaming:
+    def test_completed_stream(self) -> None:
+        """Streaming returns final status from events."""
+        lines = [
+            'data: {"type": "RUN_STARTED"}',
+            'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+            'data: {"type": "STEP_FINISHED", "node_id": "n1"}',
+            'data: {"type": "RUN_FINISHED"}',
+        ]
+        result = run_streaming(iter(lines))
+        assert result == 'RUN_FINISHED'
+
+    def test_hitl_gate_stops_stream(self) -> None:
+        """Streaming returns on WAITING_FOR_REVIEW."""
+        lines = [
+            'data: {"type": "RUN_STARTED"}',
+            'data: {"type": "WAITING_FOR_REVIEW", "node_id": "r1"}',
+        ]
+        result = run_streaming(iter(lines))
+        assert result == 'WAITING_FOR_REVIEW'
