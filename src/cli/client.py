@@ -20,6 +20,8 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
@@ -443,6 +445,47 @@ class WorkflowClient:
             json=body,
         )
         return TemporalStartResponse.model_validate(response.json())
+
+    @contextmanager
+    def stream_workflow_temporal(
+        self,
+        workflow_id: str | UUID,
+        *,
+        run_id: str,
+        inputs: dict[str, Any] | None = None,
+    ) -> Iterator[httpx.Response]:
+        """Start a workflow and yield a streaming SSE response.
+
+        Must be used as a context manager::
+
+            with client.stream_workflow_temporal(wf_id, run_id=rid) as response:
+                for line in response.iter_lines():
+                    event = parse_sse_line(line)
+
+        Args:
+            workflow_id: UUID of the workflow to execute.
+            run_id: Client-generated run ID.
+            inputs: Optional initial input data.
+
+        Yields:
+            An httpx.Response with streaming enabled. The caller iterates
+            over ``response.iter_lines()`` to consume SSE events.
+        """
+        body: dict[str, Any] = {
+            'runId': run_id,
+            'state': {'inputs': inputs or {}},
+            'messages': [],
+            'tools': [],
+            'context': [],
+            'forwardedProps': [],
+        }
+        with self._client.stream(
+            'POST',
+            f'/v2/workflows/{workflow_id}/run/temporal',
+            json=body,
+            headers={'Accept': 'text/event-stream'},
+        ) as response:
+            yield response
 
     def get_workflow_status(
         self,
