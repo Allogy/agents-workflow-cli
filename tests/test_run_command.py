@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from cli.commands.run import parse_input_arg, resolve_workflow_id
+from cli.commands.run import parse_input_arg, resolve_workflow_id, run_polling
 
 # ---------------------------------------------------------------------------
 # Input parsing tests
@@ -101,3 +101,53 @@ class TestResolveWorkflowId:
         mock_client.list_workflows.return_value = []
         with pytest.raises(ValueError, match='not found'):
             resolve_workflow_id('Nonexistent', mock_client, 'org-id')
+
+
+# ---------------------------------------------------------------------------
+# Polling execution tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunPolling:
+    def test_completed_workflow(self) -> None:
+        """Polling exits cleanly when workflow completes."""
+        mock_client = MagicMock()
+
+        # First poll: RUNNING, second poll: COMPLETED
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(status='RUNNING', current_node='node1', state={}),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'COMPLETED'
+
+    def test_failed_workflow(self) -> None:
+        """Polling returns FAILED status."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='FAILED', current_node=None, state={}
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'FAILED'
+
+    def test_waiting_for_review_exits(self) -> None:
+        """Polling exits on WAITING_FOR_REVIEW with the gate status."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_REVIEW', current_node='review_node', state={}
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'WAITING_FOR_REVIEW'
+
+    def test_waiting_for_input_exits(self) -> None:
+        """Polling exits on WAITING_FOR_INPUT with the gate status."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT', current_node='input_node', state={}
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'WAITING_FOR_INPUT'

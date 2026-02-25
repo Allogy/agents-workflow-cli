@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -135,3 +136,41 @@ def resolve_workflow_id(
     raise ValueError(
         f'Workflow "{identifier}" not found. Use a UUID or ensure the name matches exactly.'
     )
+
+
+# Terminal statuses — stop polling when any of these is reached
+_TERMINAL_STATUSES = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'}
+_HITL_STATUSES = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
+
+
+def run_polling(
+    client: WorkflowClient,
+    workflow_id: str,
+    run_id: str,
+    *,
+    poll_interval: float = 2.0,
+) -> str:
+    """Poll workflow status until terminal or HITL gate.
+
+    Args:
+        client: WorkflowClient instance.
+        workflow_id: UUID of the workflow.
+        run_id: Run ID to poll.
+        poll_interval: Seconds between polls (0 for tests).
+
+    Returns:
+        Final status string (COMPLETED, FAILED, WAITING_FOR_REVIEW, etc.).
+    """
+    while True:
+        status_resp = client.get_workflow_status(workflow_id, run_id)
+        status = status_resp.status
+
+        current_node = status_resp.current_node
+        if current_node:
+            console.print(f'  [dim]{current_node}[/dim] ... {status.lower()}')
+
+        if status in _TERMINAL_STATUSES or status in _HITL_STATUSES:
+            return status
+
+        if poll_interval > 0:
+            time.sleep(poll_interval)
