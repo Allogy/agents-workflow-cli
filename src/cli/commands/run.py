@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import json as _json
+import os
 import re
 import sys
 import time
@@ -326,9 +328,25 @@ def run_polling(
 _SSE_TERMINAL_EVENTS = {'RUN_FINISHED', 'RUN_ERROR'}
 _SSE_HITL_EVENTS = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
 
+# Color mapping by event type category
+_SSE_COLOR_MAP: dict[str, str] = {
+    'RUN_STARTED': 'green',
+    'STEP_FINISHED': 'green',
+    'RUN_FINISHED': 'green',
+    'REVIEW_COMPLETE': 'green',
+    'STEP_STARTED': 'blue',
+    'WAITING_FOR_REVIEW': 'yellow',
+    'WAITING_FOR_INPUT': 'yellow',
+    'STEP_ERROR': 'red',
+    'RUN_ERROR': 'red',
+}
 
-def format_sse_event(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) -> str:
-    """Format an SSE event for console display.
+
+def format_sse_compact(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) -> str:
+    """Format an SSE event in compact one-line format with timestamp.
+
+    Format: [HH:MM:SS] EVENT_TYPE node-name
+    Color-coded by event type category.
 
     Args:
         event: Parsed SSE event.
@@ -338,34 +356,66 @@ def format_sse_event(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) ->
     Returns:
         Formatted string for Rich console output.
     """
+    ts = datetime.now().strftime('%H:%M:%S')
     t = event.event_type
     node_id = event.data.get('node_id', '')
+    color = _SSE_COLOR_MAP.get(t, 'dim')
+    suffix = f' {node_id}' if node_id else ''
+
+    # Add error detail for error events
+    if t in ('STEP_ERROR', 'RUN_ERROR'):
+        error = event.data.get('error', '')
+        if error:
+            suffix += f': {error}'
+
+    return f'[dim][{ts}][/dim] [{color}]{t}[/{color}]{suffix}'
+
+
+def format_sse_verbose(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) -> str:
+    """Format an SSE event in verbose multi-line format with payload excerpts.
+
+    Shows timestamp, event type, node info, and a payload excerpt.
+
+    Args:
+        event: Parsed SSE event.
+        step: Current step number (1-based) for progress display.
+        total_nodes: Total number of nodes for progress display.
+
+    Returns:
+        Formatted string for Rich console output.
+    """
+    ts = datetime.now().strftime('%H:%M:%S')
+    t = event.event_type
+    node_id = event.data.get('node_id', '')
+    color = _SSE_COLOR_MAP.get(t, 'dim')
+
+    lines = [f'[dim][{ts}][/dim] [{color}]{t}[/{color}]']
+    if node_id:
+        lines[0] += f'  {node_id}'
+
+    # Add step type info
     step_type = event.data.get('step_type', '')
-    progress = f'[dim][{step}/{total_nodes}][/dim] ' if step > 0 and total_nodes > 0 else ''
+    if step_type:
+        lines.append(f'  [dim]Type:[/dim] {step_type}')
 
-    if t == 'RUN_STARTED':
-        return '[green]▶ RUN_STARTED[/green]'
-    if t == 'STEP_STARTED':
-        suffix = f' ({step_type})' if step_type else ''
-        return f'[blue]⏳ STEP_STARTED[/blue]  {progress}{node_id}{suffix}'
-    if t == 'STEP_FINISHED':
-        return f'[green]✓ STEP_FINISHED[/green] {progress}{node_id}'
-    if t == 'STEP_ERROR':
-        error = event.data.get('error', 'unknown error')
-        return f'[red]✗ STEP_ERROR[/red]  {progress}{node_id}: {error}'
-    if t == 'WAITING_FOR_REVIEW':
-        return f'[yellow]⏸ WAITING_FOR_REVIEW[/yellow] at {node_id}'
-    if t == 'WAITING_FOR_INPUT':
-        return f'[yellow]⏸ WAITING_FOR_INPUT[/yellow] at {node_id}'
-    if t == 'RUN_FINISHED':
-        return '[green]✓ RUN_FINISHED[/green]'
-    if t == 'RUN_ERROR':
-        error = event.data.get('error', 'unknown error')
-        return f'[red]✗ RUN_ERROR[/red]: {error}'
-    if t == 'REVIEW_COMPLETE':
-        return f'[green]✓ REVIEW_COMPLETE[/green]  {node_id}'
+    # Add payload excerpt (exclude type and node_id which are already shown)
+    payload_keys = {
+        k: v for k, v in event.data.items() if k not in ('type', 'node_id', 'step_type')
+    }
+    if payload_keys:
+        excerpt = _json.dumps(payload_keys, indent=2, default=str)
+        # Truncate long payloads
+        max_lines = 6
+        excerpt_lines = excerpt.split('\n')
+        if len(excerpt_lines) > max_lines:
+            excerpt = '\n'.join(excerpt_lines[:max_lines]) + '\n  ...'
+        lines.append(f'  [dim]Payload:[/dim]\n  {excerpt}')
 
-    return f'[dim]{t}[/dim]  {node_id}'
+    return '\n'.join(lines)
+
+
+# Backward compatibility alias
+format_sse_event = format_sse_compact
 
 
 def run_streaming(
@@ -373,6 +423,8 @@ def run_streaming(
     *,
     total_nodes: int = 0,
     max_timeout_seconds: int | float | None = None,
+    verbose: bool = False,
+    output_console: Console | None = None,
 ) -> str:
     """Process SSE event lines until terminal or HITL event.
 
@@ -381,6 +433,8 @@ def run_streaming(
         total_nodes: Total number of nodes for progress display.
         max_timeout_seconds: Maximum wall-clock time before timeout.
             Defaults to the value from get_run_timeout() (30 minutes).
+        verbose: Use verbose multi-line format instead of compact.
+        output_console: Console to use for output (for --no-color support).
 
     Returns:
         Final event type string.
@@ -392,6 +446,8 @@ def run_streaming(
     start_time = time.monotonic()
     last_event_type = 'UNKNOWN'
     seen_nodes: list[str] = []
+    fmt = format_sse_verbose if verbose else format_sse_compact
+    out = output_console or console
 
     for line in lines:
         event = parse_sse_line(line)
@@ -403,23 +459,40 @@ def run_streaming(
             seen_nodes.append(node_id)
 
         step = len(seen_nodes)
-        console.print(format_sse_event(event, step=step, total_nodes=total_nodes))
+        out.print(fmt(event, step=step, total_nodes=total_nodes))
         last_event_type = event.event_type
 
         # Normalize to uppercase for comparison (backend returns mixed case)
-        if (
-            last_event_type.upper() in _SSE_TERMINAL_EVENTS
-            or last_event_type.upper() in _SSE_HITL_EVENTS
-        ):
+        if last_event_type.upper() in _SSE_HITL_EVENTS:
+            # Print actionable HITL hint
+            hitl_node_id = event.data.get('node_id', '<node-id>')
+            if last_event_type.upper() == 'WAITING_FOR_INPUT':
+                out.print(
+                    f"  [dim]Next: workflow input --node-id {hitl_node_id} --data '{{...}}'[/dim]"
+                )
+            elif last_event_type.upper() == 'WAITING_FOR_REVIEW':
+                out.print('  [dim]Next: workflow review --approve[/dim]')
+            return last_event_type
+
+        if last_event_type.upper() in _SSE_TERMINAL_EVENTS:
             return last_event_type
 
         elapsed = time.monotonic() - start_time
         if elapsed >= timeout:
-            console.print(
+            out.print(
                 f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
                 f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
             )
             sys.exit(1)
+
+    # Stream ended without terminal event -- connection may have been interrupted
+    if last_event_type.upper() not in _SSE_TERMINAL_EVENTS and last_event_type.upper() not in (
+        _SSE_HITL_EVENTS
+    ):
+        out.print(
+            '[bold yellow]Warning:[/bold yellow] Stream interrupted before completion. '
+            'Use [cyan]workflow status[/cyan] to check current state.'
+        )
 
     return last_event_type
 
@@ -436,6 +509,8 @@ def run_command(
     *,
     stream: bool = False,
     no_follow: bool = False,
+    verbose: bool = False,
+    no_color: bool = False,
     working_dir: Path | None = None,
 ) -> None:
     """Main entry point for the run command.
@@ -446,10 +521,20 @@ def run_command(
         input_data: JSON string or @filepath for initial inputs.
         stream: Use SSE streaming instead of polling.
         no_follow: Fire-and-forget mode.
+        verbose: Use verbose multi-line SSE output.
+        no_color: Disable colored output.
         working_dir: Directory for .last_run file (defaults to cwd).
     """
     config.validate_for_api()
     cwd = working_dir or Path.cwd()
+
+    # Respect NO_COLOR env var (https://no-color.org/)
+    effective_no_color = no_color or bool(os.environ.get('NO_COLOR'))
+
+    # Create a no-color console if requested, otherwise use the module console
+    output_console: Console | None = None
+    if effective_no_color:
+        output_console = Console(no_color=True)
 
     # Parse input
     inputs = parse_input_arg(input_data)
@@ -486,7 +571,12 @@ def run_command(
             with client.stream_workflow_temporal(
                 workflow_id, run_id=run_id, inputs=inputs
             ) as response:
-                final_status = run_streaming(response.iter_lines(), total_nodes=total_nodes)
+                final_status = run_streaming(
+                    response.iter_lines(),
+                    total_nodes=total_nodes,
+                    verbose=verbose,
+                    output_console=output_console,
+                )
 
         else:
             # Start workflow (polling or no-follow)

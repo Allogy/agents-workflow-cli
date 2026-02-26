@@ -379,6 +379,20 @@ def run(
             help='Start the workflow and exit immediately.',
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            '--verbose',
+            help='Show detailed multi-line SSE output with payload excerpts.',
+        ),
+    ] = False,
+    no_color: Annotated[
+        bool,
+        typer.Option(
+            '--no-color',
+            help='Disable colored output (also respects NO_COLOR env var).',
+        ),
+    ] = False,
 ) -> None:
     """Execute a workflow via Temporal runtime.
 
@@ -388,6 +402,10 @@ def run(
     Default mode polls for status every 2 seconds. Use --stream for
     real-time SSE event display. Use --no-follow to start and exit
     immediately.
+
+    Use --verbose with --stream for detailed multi-line output with
+    payload excerpts. Use --no-color to disable colored output
+    (for CI pipelines or piped output).
 
     When a human-in-the-loop gate is reached (INPUT or REVIEW node),
     the command exits with a hint for the next action.
@@ -401,11 +419,21 @@ def run(
         workflow run 939843a8-6257-4475-bfc0-f7d6500d9f00
         workflow run "Invoice Processing" --input '{"question": "What is AI?"}'
         workflow run my-workflow --input @input.json --stream
+        workflow run my-workflow --stream --verbose
         workflow run my-workflow --no-follow
+        workflow run my-workflow --stream --no-color
     """
     config = get_config()
     try:
-        run_command(config, identifier, input_data, stream=stream, no_follow=no_follow)
+        run_command(
+            config,
+            identifier,
+            input_data,
+            stream=stream,
+            no_follow=no_follow,
+            verbose=verbose,
+            no_color=no_color,
+        )
     except (ValueError, FileNotFoundError) as e:
         # User errors: bad input, not found, invalid JSON -> exit 2
         console.print(f'[bold red]Error:[/bold red] {e}')

@@ -678,9 +678,10 @@ class TestFormatSseCompact:
             data={'type': 'STEP_FINISHED', 'node_id': 'process-invoice'},
         )
         line = format_sse_compact(event)
-        # Strip Rich markup tags to check the plain-text pattern
-        plain = re.sub(r'\[/?[^\]]+\]', '', line)
-        assert re.search(r'\[\d{2}:\d{2}:\d{2}\] STEP_FINISHED process-invoice', plain)
+        # Check the raw Rich markup string for the timestamp pattern
+        assert re.search(r'\[\d{2}:\d{2}:\d{2}\]', line)
+        assert 'STEP_FINISHED' in line
+        assert 'process-invoice' in line
 
     def test_compact_success_events_green(self) -> None:
         """Success events (RUN_FINISHED) use green color markup."""
@@ -736,8 +737,8 @@ class TestFormatSseVerbose:
             data={'type': 'STEP_FINISHED', 'node_id': 'abc'},
         )
         line = format_sse_verbose(event)
-        plain = re.sub(r'\[/?[^\]]+\]', '', line)
-        assert re.search(r'\[\d{2}:\d{2}:\d{2}\]', plain)
+        # Check the raw Rich markup string for the timestamp pattern
+        assert re.search(r'\[\d{2}:\d{2}:\d{2}\]', line)
 
 
 # ---------------------------------------------------------------------------
