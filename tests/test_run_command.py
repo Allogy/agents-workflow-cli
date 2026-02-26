@@ -118,7 +118,7 @@ class TestResolveWorkflowId:
         """Unknown name raises ValueError."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = []
-        with pytest.raises(ValueError, match='not found'):
+        with pytest.raises(ValueError, match='No workflow found matching'):
             resolve_workflow_id('Nonexistent', mock_client, 'org-id')
 
 
@@ -569,10 +569,12 @@ runner = CliRunner()
 class TestRunCommandExitCodes:
     def test_invalid_json_exits_with_code_2(self) -> None:
         """Invalid JSON --input exits with code 2 (user error, not 1)."""
-        result = runner.invoke(
-            app,
-            ['run', '939843a8-6257-4475-bfc0-f7d6500d9f00', '--input', 'not-json'],
-        )
+        with patch('cli.main.load_config') as mock_load_config:
+            mock_load_config.return_value = _make_mock_config()
+            result = runner.invoke(
+                app,
+                ['run', '939843a8-6257-4475-bfc0-f7d6500d9f00', '--input', 'not-json'],
+            )
         assert result.exit_code == 2
 
     def test_workflow_not_found_exits_with_code_2(self) -> None:

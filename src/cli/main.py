@@ -395,7 +395,7 @@ def run(
     A .workflow.last_run context file is written for use by subsequent
     workflow status/input/review commands.
 
-    Exit codes: 0 = success or HITL pause, 1 = failure
+    Exit codes: 0 = success or HITL pause, 1 = runtime error, 2 = user error
 
     Examples:
         workflow run 939843a8-6257-4475-bfc0-f7d6500d9f00
@@ -406,6 +406,11 @@ def run(
     config = get_config()
     try:
         run_command(config, identifier, input_data, stream=stream, no_follow=no_follow)
+    except (ValueError, FileNotFoundError) as e:
+        # User errors: bad input, not found, invalid JSON -> exit 2
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(2) from e
     except Exception as e:
+        # Runtime errors: network, server, timeout -> exit 1
         console.print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e

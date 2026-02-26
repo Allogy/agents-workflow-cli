@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import sys
@@ -30,6 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 from rich.console import Console
 
@@ -47,6 +49,22 @@ _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 def _is_uuid(value: str) -> bool:
     """Check whether a string looks like a UUID."""
     return bool(_UUID_RE.match(value))
+
+
+def _suggest_names(target: str, available: list[str], max_suggestions: int = 3) -> list[str]:
+    """Return up to max_suggestions close matches for target from available names.
+
+    Preserves original casing in returned suggestions even though matching is
+    case-insensitive.
+    """
+    lower_to_original = {name.lower(): name for name in available}
+    matches = difflib.get_close_matches(
+        target.lower(),
+        list(lower_to_original.keys()),
+        n=max_suggestions,
+        cutoff=0.4,
+    )
+    return [lower_to_original[m] for m in matches]
 
 
 def parse_input_arg(value: str | None) -> dict[str, Any]:
@@ -76,7 +94,10 @@ def parse_input_arg(value: str | None) -> dict[str, Any]:
     try:
         result = json.loads(value)
     except json.JSONDecodeError as e:
-        raise ValueError(f'Invalid JSON input: {e}') from e
+        raise ValueError(
+            f'Invalid JSON input: {e}\n'
+            f'  Usage: --input \'{{"key": "value"}}\' or --input @file.json'
+        ) from e
 
     if not isinstance(result, dict):
         raise ValueError('Invalid JSON input: expected an object, got ' + type(result).__name__)
@@ -133,19 +154,33 @@ def resolve_workflow_id(
             except Exception:
                 continue
 
-    # 3. API name search
+    # 3. API name search -- collect all names for suggestions
     workflows = client.list_workflows(organization_id=org_id)
+    all_names: list[str] = []
+    name_to_id: dict[str, str] = {}
     for workflow in workflows:
         try:
             metadata = client.get_metadata(workflow.id)
-            if metadata.name and metadata.name.lower() == identifier.lower():
-                return str(workflow.id)
+            if metadata.name:
+                all_names.append(metadata.name)
+                name_to_id[metadata.name.lower()] = str(workflow.id)
         except Exception:
             continue
 
-    raise ValueError(
-        f'Workflow "{identifier}" not found. Use a UUID or ensure the name matches exactly.'
-    )
+    # Check for exact match (case-insensitive)
+    match_id = name_to_id.get(identifier.lower())
+    if match_id:
+        return match_id
+
+    # No exact match -- suggest close matches
+    suggestions = _suggest_names(identifier, all_names)
+    if suggestions:
+        suggestion_list = '\n'.join(f'  - {name}' for name in suggestions)
+        raise ValueError(
+            f"No workflow found matching '{identifier}'. Did you mean:\n{suggestion_list}"
+        )
+
+    raise ValueError(f"No workflow found matching '{identifier}'.")
 
 
 # Terminal statuses — stop polling when any of these is reached
@@ -180,6 +215,46 @@ def _format_duration(seconds: int) -> str:
     return ' '.join(parts)
 
 
+def _poll_with_retry(
+    client: WorkflowClient,
+    workflow_id: str,
+    run_id: str,
+    *,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+) -> Any:
+    """Poll status with exponential backoff on network errors.
+
+    Args:
+        client: WorkflowClient instance.
+        workflow_id: UUID of the workflow.
+        run_id: Run ID to poll.
+        max_retries: Maximum retry attempts on network errors.
+        base_delay: Base delay in seconds (doubles each retry: 1s, 2s, 4s).
+
+    Returns:
+        WorkflowStatusResponse from the server.
+
+    Raises:
+        httpx.ConnectError: If all retries are exhausted.
+        httpx.TimeoutException: If all retries are exhausted.
+        httpx.ReadError: If all retries are exhausted.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return client.get_workflow_status(workflow_id, run_id)
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+            if attempt == max_retries:
+                raise
+            delay = base_delay * (2**attempt)  # 1s, 2s, 4s
+            console.print(
+                f'[dim]Network error, retrying in {delay:.0f}s... '
+                f'({attempt + 1}/{max_retries})[/dim]'
+            )
+            time.sleep(delay)
+    raise RuntimeError('Unreachable')  # pragma: no cover
+
+
 def run_polling(
     client: WorkflowClient,
     workflow_id: str,
@@ -211,7 +286,7 @@ def run_polling(
     seen_nodes: list[str] = []
 
     while True:
-        status_resp = client.get_workflow_status(workflow_id, run_id)
+        status_resp = _poll_with_retry(client, workflow_id, run_id)
         status = status_resp.status
 
         current_node = status_resp.current_node
