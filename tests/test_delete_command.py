@@ -429,3 +429,43 @@ class TestDeleteErrorHandling:
 
         assert result.exit_code != 0
         assert 'host' in result.output.lower() or 'config' in result.output.lower()
+
+    @patch('cli.commands.delete.Confirm.ask')
+    @patch('cli.commands.delete.WorkflowClient')
+    def test_delete_api_error_during_deletion(self, mock_client_class, mock_confirm):
+        """Test that API errors during the delete call are reported."""
+        mock_client = MagicMock()
+        workflow_id = uuid4()
+        org_id = uuid4()
+
+        mock_workflow = SimpleNamespace(
+            id=workflow_id,
+            version=1,
+            organization_id=org_id,
+        )
+        mock_metadata = SimpleNamespace(
+            workflow_id=workflow_id,
+            name='Test Workflow',
+        )
+        mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
+        mock_client.delete_workflow.side_effect = Exception('Server error: 500')
+        mock_client_class.from_config.return_value.__enter__.return_value = mock_client
+        mock_confirm.return_value = True
+
+        result = runner.invoke(
+            app,
+            [
+                '--host',
+                'https://api.example.com',
+                '--api-key',
+                'test-key',
+                '--org',
+                str(org_id),
+                'delete',
+                str(workflow_id),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert 'error' in result.output.lower() or 'failed' in result.output.lower()

@@ -262,6 +262,18 @@ class TestPrintFinalStatus:
         """TIMED_OUT status prints appropriate message."""
         _print_final_status('TIMED_OUT', 'run-id')
 
+    def test_waiting_for_review_prints_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """WAITING_FOR_REVIEW prints a next-step hint with the review command."""
+        _print_final_status('WAITING_FOR_REVIEW', 'test-run-id')
+        captured = capsys.readouterr()
+        assert 'review' in captured.out.lower() or 'review' in str(captured)
+
+    def test_waiting_for_input_prints_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """WAITING_FOR_INPUT prints a next-step hint with the input command."""
+        _print_final_status('WAITING_FOR_INPUT', 'test-run-id')
+        captured = capsys.readouterr()
+        assert 'input' in captured.out.lower() or 'input' in str(captured)
+
 
 def _make_mock_client(**overrides: Any) -> MagicMock:
     """Create a mock WorkflowClient with sensible defaults."""
