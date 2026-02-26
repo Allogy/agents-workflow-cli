@@ -10,6 +10,7 @@ from uuid import UUID
 import pytest
 
 from cli.commands.run import (
+    _print_final_status,
     format_sse_event,
     parse_input_arg,
     resolve_workflow_id,
@@ -231,6 +232,51 @@ class TestRunStreaming:
 # ---------------------------------------------------------------------------
 # Orchestrator tests
 # ---------------------------------------------------------------------------
+
+
+class TestPrintFinalStatus:
+    def test_cancelled_status(self) -> None:
+        """CANCELLED status prints appropriate message."""
+        _print_final_status('CANCELLED', 'run-id')
+
+    def test_timed_out_status(self) -> None:
+        """TIMED_OUT status prints appropriate message."""
+        _print_final_status('TIMED_OUT', 'run-id')
+
+
+class TestRunCommandExitCode:
+    def test_failed_workflow_exits_with_code_1(self, tmp_path: Path) -> None:
+        """Polling mode exits with code 1 when workflow fails."""
+        mock_client = MagicMock()
+        mock_client.start_workflow_temporal.return_value = MagicMock(
+            run_id='test-run-id',
+            workflow_id='wf-123',
+            status='RUNNING',
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='FAILED',
+            current_node=None,
+            state={},
+        )
+
+        mock_config = MagicMock()
+        mock_config.host = 'https://api.example.com'
+        mock_config.org_id = 'org-123'
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(SystemExit) as exc_info:
+                run_command(
+                    config=mock_config,
+                    identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                    input_data=None,
+                    stream=False,
+                    no_follow=False,
+                    working_dir=tmp_path,
+                )
+            assert exc_info.value.code == 1
 
 
 class TestRunCommand:

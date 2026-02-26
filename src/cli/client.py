@@ -484,7 +484,9 @@ class WorkflowClient:
             f'/v2/workflows/{workflow_id}/run/temporal',
             json=body,
             headers={'Accept': 'text/event-stream'},
+            timeout=None,
         ) as response:
+            raise_for_status(response)
             yield response
 
     def get_workflow_status(

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 import uuid as uuid_mod
 from collections.abc import Iterator
@@ -339,6 +340,14 @@ def run_command(
         # Handle final status
         _print_final_status(final_status, run_id)
 
+        # Exit with code 1 for failure statuses
+        if final_status in _FAILURE_STATUSES:
+            sys.exit(1)
+
+
+# Statuses that indicate workflow failure (exit code 1)
+_FAILURE_STATUSES = {'FAILED', 'RUN_ERROR', 'CANCELLED', 'TIMED_OUT'}
+
 
 def _print_final_status(status: str, run_id: str) -> None:
     """Print final status message with appropriate hints."""
@@ -348,6 +357,9 @@ def _print_final_status(status: str, run_id: str) -> None:
     elif status in ('FAILED', 'RUN_ERROR'):
         console.print()
         console.print('[bold red]✗ Workflow failed[/bold red]')
+    elif status in ('CANCELLED', 'TIMED_OUT'):
+        console.print()
+        console.print(f'[bold red]✗ Workflow {status.lower().replace("_", " ")}[/bold red]')
     elif status == 'WAITING_FOR_REVIEW':
         console.print()
         console.print('[bold yellow]⏸  Workflow paused — waiting for human review[/bold yellow]')

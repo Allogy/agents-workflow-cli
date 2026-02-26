@@ -40,3 +40,4 @@ htmlcov/
 .ruff_cache/
 *.workflow.lock
 *.workflow.yaml
+.workflow.last_run
