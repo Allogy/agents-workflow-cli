@@ -28,10 +28,10 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode='rich',
 )
-console = Console()
 
-# Module-level state for the resolved config (set by the callback)
+# Module-level state (set by the callback)
 _config: CLIConfig | None = None
+_no_color: bool = False
 
 
 def get_config() -> CLIConfig:
@@ -39,6 +39,15 @@ def get_config() -> CLIConfig:
     if _config is None:
         return load_config()
     return _config
+
+
+def get_console() -> Console:
+    """Return a Rich Console respecting the global --no-color flag.
+
+    Rich Console natively honours the NO_COLOR environment variable,
+    so only the explicit CLI flag needs handling here.
+    """
+    return Console(no_color=True) if _no_color else Console()
 
 
 class FormatChoice(str, Enum):
@@ -51,7 +60,7 @@ class FormatChoice(str, Enum):
 def version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
-        console.print(f'workflow-cli v{__version__}')
+        get_console().print(f'workflow-cli v{__version__}')
         raise typer.Exit()
 
 
@@ -98,9 +107,18 @@ def main(
             help='Output format: json or yaml.',
         ),
     ] = None,
+    no_color: Annotated[
+        bool,
+        typer.Option(
+            '--no-color',
+            help='Disable colored output.',
+        ),
+    ] = False,
 ) -> None:
     """Agents Platform Workflow CLI."""
-    global _config  # noqa: PLW0603
+    global _config, _no_color  # noqa: PLW0603
+
+    _no_color = no_color
 
     # Load base config from file + env vars, then apply CLI flag overrides
     base = load_config()
@@ -216,7 +234,7 @@ def push(
     try:
         push_workflow(file_path, config)
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        get_console().print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
 
 
@@ -260,7 +278,7 @@ def pull(
     try:
         pull_workflow(identifier, config, output)
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        get_console().print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
 
 
@@ -302,7 +320,7 @@ def list(
     try:
         list_command(config, output_format.value if output_format else None)
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        get_console().print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
 
 
@@ -348,7 +366,7 @@ def delete(
     try:
         delete_command(config, identifier, force)
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        get_console().print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
 
 
@@ -439,11 +457,11 @@ def run(
         )
     except (ValueError, FileNotFoundError) as e:
         # User errors: bad input, not found, invalid JSON -> exit 2
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
         # Runtime errors: network, server, timeout -> exit 1
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e
 
 
@@ -483,10 +501,10 @@ def status(
     try:
         status_command(config, run_id, json_output=json_output)
     except (ValueError, FileNotFoundError) as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e
 
 
@@ -544,10 +562,10 @@ def input_cmd(
     try:
         input_command(config, node_id, data, run_id=run_id, json_output=json_output)
     except (ValueError, FileNotFoundError) as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e
 
 
@@ -635,8 +653,8 @@ def review(
             json_output=json_output,
         )
     except (ValueError, FileNotFoundError) as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
-        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e

@@ -23,14 +23,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rich.console import Console
 from rich.prompt import Confirm
 
 from cli.client import WorkflowClient
 from cli.commands.status import _resolve_run_context
 from cli.config import CLIConfig
-
-console = Console()
+from cli.main import get_console
 
 # Decision label mapping for confirmation prompt and success message
 _DECISION_LABELS: dict[str, str] = {
@@ -75,6 +73,7 @@ def review_command(
     """
     config.validate_for_api()
     cwd = working_dir or Path.cwd()
+    console = get_console()
 
     # Validate exactly one decision flag
     chosen = [

@@ -41,6 +41,7 @@ from cli.client import WorkflowClient
 from cli.config import CLIConfig, get_run_timeout
 from cli.last_run import LastRunContext, save_last_run
 from cli.lockfile import load_lockfile
+from cli.main import get_console
 from cli.sse import SSEEvent, parse_sse_line
 
 console = Console()
@@ -528,13 +529,13 @@ def run_command(
     config.validate_for_api()
     cwd = working_dir or Path.cwd()
 
-    # Respect NO_COLOR env var (https://no-color.org/)
-    effective_no_color = no_color or bool(os.environ.get('NO_COLOR'))
-
-    # Create a no-color console if requested, otherwise use the module console
+    # Per-command --no-color overrides; otherwise get_console() respects the global flag.
+    # Rich Console natively honours the NO_COLOR env var.
     output_console: Console | None = None
-    if effective_no_color:
+    if no_color or os.environ.get('NO_COLOR'):
         output_console = Console(no_color=True)
+    else:
+        output_console = get_console()
 
     # Parse input
     inputs = parse_input_arg(input_data)

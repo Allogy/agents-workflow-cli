@@ -22,12 +22,21 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.table import Table
 
 from cli.client import WorkflowClient, WorkflowStatusResponse
 from cli.config import CLIConfig
 from cli.last_run import load_last_run
+from cli.main import get_console
 
-console = Console()
+STATUS_STYLES: dict[str, str] = {
+    'COMPLETED': 'green',
+    'RUNNING': 'yellow',
+    'WAITING_FOR_INPUT': 'yellow',
+    'WAITING_FOR_REVIEW': 'yellow',
+    'FAILED': 'red',
+    'PENDING': 'dim',
+}
 
 
 def _resolve_run_context(
@@ -136,17 +145,21 @@ def _format_node_id(node_id: str) -> str:
 def _format_status_table(
     status_resp: WorkflowStatusResponse,
     nodes: list[Any],
+    output_console: Console | None = None,
 ) -> None:
-    """Print a unified status table with overall state and per-node rows.
+    """Print a Rich Table with summary header and color-coded per-node statuses.
 
-    First displays overall workflow info, then a per-node table with
-    columns: Node ID, Type, Status. Paused nodes are prefixed with '>>'
-    as a visual marker.
+    Displays a summary header with overall workflow status and node completion
+    progress, followed by a Rich Table with columns: Node, Type, Status.
+    Status cells are color-coded per STATUS_STYLES.
 
     Args:
         status_resp: Workflow status response from the API.
         nodes: List of LogicalNodePublic from list_nodes().
+        output_console: Optional Rich Console override (for --no-color).
     """
+    out = output_console or get_console()
+
     state = status_resp.state
     execution_history: list[str] = state.get('execution_history', [])
     node_outputs: dict[str, Any] = state.get('node_outputs', {})
@@ -157,29 +170,15 @@ def _format_status_table(
     waiting_input_node_id: str | None = state.get('waiting_input_node_id')
     review_node_id: str | None = state.get('review_node_id')
 
-    # Overall workflow info
-    console.print(f'Workflow: {status_resp.workflow_id}')
-    console.print(f'Run:      {status_resp.run_id}')
-    console.print(f'Status:   {status_resp.status}')
-    console.print()
-
-    # Build node-to-type map for quick lookup
+    # Build node-to-type map and compute all node statuses in a single pass
     node_type_map: dict[str, str] = {}
-    for node in nodes:
-        node_type_map[str(node.id)] = (
-            node.config_type.value if hasattr(node.config_type, 'value') else str(node.config_type)
-        )
-
-    # Table header
-    console.print(f'{"":2s} {"Node ID":<12s} {"Type":<20s} {"Status":<20s}')
-    console.print(f'{"":2s} {"-" * 12} {"-" * 20} {"-" * 20}')
-
-    # Per-node rows
-    paused_statuses = {'WAITING_FOR_INPUT', 'WAITING_FOR_REVIEW'}
+    node_statuses: dict[str, str] = {}
     for node in nodes:
         nid = str(node.id)
-        config_type = node_type_map.get(nid, 'UNKNOWN')
-        derived = _derive_node_status(
+        node_type_map[nid] = (
+            node.config_type.value if hasattr(node.config_type, 'value') else str(node.config_type)
+        )
+        node_statuses[nid] = _derive_node_status(
             nid,
             execution_history,
             current_node_id,
@@ -189,20 +188,47 @@ def _format_status_table(
             review_node_id,
         )
 
-        marker = '>>' if derived in paused_statuses else '  '
-        console.print(f'{marker} {_format_node_id(nid):<12s} {config_type:<20s} {derived:<20s}')
+    # Summary header
+    completed_count = sum(1 for s in node_statuses.values() if s == 'COMPLETED')
+    total = len(nodes)
+    out.print(f'Workflow: {overall_status.lower()} \u2014 {completed_count}/{total} nodes complete')
+    out.print(f'[dim]ID: {status_resp.workflow_id}  Run: {status_resp.run_id}[/dim]')
+    out.print()
+
+    # Build Rich Table
+    table = Table(show_header=True, header_style='bold')
+    table.add_column('Node', style='cyan', no_wrap=True)
+    table.add_column('Type')
+    table.add_column('Status')
+
+    for node in nodes:
+        nid = str(node.id)
+        config_type = node_type_map.get(nid, 'UNKNOWN')
+        derived = node_statuses[nid]
+        color = STATUS_STYLES.get(derived, 'white')
+        table.add_row(
+            _format_node_id(nid),
+            config_type,
+            f'[{color}]{derived}[/{color}]',
+        )
+
+    out.print(table)
 
 
 def _print_hints(
     status_resp: WorkflowStatusResponse,
     nodes: list[Any],
+    output_console: Console | None = None,
 ) -> None:
     """Print actionable hints for paused nodes after the status table.
 
     Args:
         status_resp: Workflow status response from the API.
         nodes: List of LogicalNodePublic from list_nodes().
+        output_console: Optional Rich Console override (for --no-color).
     """
+    out = output_console or get_console()
+
     state = status_resp.state
     execution_history: list[str] = state.get('execution_history', [])
     node_outputs: dict[str, Any] = state.get('node_outputs', {})
@@ -235,14 +261,14 @@ def _print_hints(
 
         if derived == 'WAITING_FOR_INPUT':
             if not hints_printed:
-                console.print()
+                out.print()
                 hints_printed = True
-            console.print(f"Tip: workflow input --node-id {nid} --data '{{...}}' ({config_type})")
+            out.print(f"Tip: workflow input --node-id {nid} --data '{{...}}' ({config_type})")
         elif derived == 'WAITING_FOR_REVIEW':
             if not hints_printed:
-                console.print()
+                out.print()
                 hints_printed = True
-            console.print(
+            out.print(
                 f'Tip: workflow review --run-id {status_resp.run_id} --node-id {nid} --approve'
             )
 
@@ -279,5 +305,6 @@ def status_command(
         print(json.dumps(status_resp.model_dump(), indent=2, default=str))
         return
 
-    _format_status_table(status_resp, nodes)
-    _print_hints(status_resp, nodes)
+    out = get_console()
+    _format_status_table(status_resp, nodes, output_console=out)
+    _print_hints(status_resp, nodes, output_console=out)

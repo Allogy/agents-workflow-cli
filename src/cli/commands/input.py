@@ -21,15 +21,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console
 from rich.prompt import Confirm
 
 from cli.client import WorkflowClient
 from cli.commands.run import parse_input_arg
 from cli.commands.status import _resolve_run_context
 from cli.config import CLIConfig
-
-console = Console()
+from cli.main import get_console
 
 
 def input_command(
@@ -66,6 +64,8 @@ def input_command(
 
     # Parse data payload (handles None, JSON string, @filepath)
     data_dict: dict[str, Any] = parse_input_arg(data)
+
+    console = get_console()
 
     # Confirmation prompt
     confirmed = Confirm.ask(f'Submit input to node {node_id}?', default=True)
