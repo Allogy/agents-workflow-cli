@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
 
-from cli.client import SubmitInputResponse
+from cli.client import SubmitInputResponse, WorkflowStatusResponse
 from cli.last_run import LastRunContext, save_last_run
 
 # ---------------------------------------------------------------------------
@@ -50,6 +51,64 @@ def _make_mock_config() -> MagicMock:
     return MagicMock(spec=CLIConfig)
 
 
+def _make_nodes() -> list[SimpleNamespace]:
+    """Return mock nodes including the default input node."""
+    return [
+        SimpleNamespace(id='node-agent-1', config_type=SimpleNamespace(value='AGENT')),
+        SimpleNamespace(id=_NODE_ID, config_type=SimpleNamespace(value='PLAIN_TXT_INPUT')),
+        SimpleNamespace(id='node-review-1', config_type=SimpleNamespace(value='HUMAN_REVIEW')),
+    ]
+
+
+def _make_status_response(
+    *,
+    status: str = 'WAITING_FOR_INPUT',
+    waiting_input_node_id: str | None = _NODE_ID,
+    review_node_id: str | None = None,
+) -> WorkflowStatusResponse:
+    """Create a status response for pre-flight validation."""
+    state: dict = {
+        'execution_history': ['node-agent-1'],
+        'node_outputs': {'node-agent-1': {}},
+        'current_node_id': waiting_input_node_id,
+        'execution_status': status,
+    }
+    if waiting_input_node_id:
+        state['waiting_input_node_id'] = waiting_input_node_id
+    if review_node_id:
+        state['review_node_id'] = review_node_id
+    return WorkflowStatusResponse(
+        workflow_id=_WORKFLOW_ID,
+        run_id=_RUN_ID,
+        status=status,
+        current_node=waiting_input_node_id,
+        state=state,
+    )
+
+
+def _setup_mock_client(
+    mock_client_class: MagicMock,
+    mock_client: MagicMock,
+) -> None:
+    """Wire up the mock client class's from_config context manager."""
+    mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+    mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+
+def _make_ready_mock_client(
+    *,
+    waiting_input_node_id: str = _NODE_ID,
+) -> MagicMock:
+    """Create a mock client configured for a valid input state."""
+    mock_client = MagicMock()
+    mock_client.get_workflow_status.return_value = _make_status_response(
+        waiting_input_node_id=waiting_input_node_id,
+    )
+    mock_client.list_nodes.return_value = _make_nodes()
+    mock_client.submit_input.return_value = _make_submit_response()
+    return mock_client
+
+
 # ---------------------------------------------------------------------------
 # INPUT-01: Submit JSON string data
 # ---------------------------------------------------------------------------
@@ -66,10 +125,8 @@ class TestInputSubmitJsonData:
 
         save_last_run(tmp_path, _make_last_run_context())
 
-        mock_client = MagicMock()
-        mock_client.submit_input.return_value = _make_submit_response()
-        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
 
         config = _make_mock_config()
         input_command(
@@ -108,10 +165,8 @@ class TestInputSubmitFileData:
         input_file = tmp_path / 'input.json'
         input_file.write_text(json.dumps({'question': 'What is AI?'}))
 
-        mock_client = MagicMock()
-        mock_client.submit_input.return_value = _make_submit_response()
-        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
 
         config = _make_mock_config()
         input_command(
@@ -145,9 +200,8 @@ class TestInputCancelled:
 
         save_last_run(tmp_path, _make_last_run_context())
 
-        mock_client = MagicMock()
-        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
 
         config = _make_mock_config()
         input_command(
@@ -177,10 +231,8 @@ class TestInputJsonOutput:
 
         save_last_run(tmp_path, _make_last_run_context())
 
-        mock_client = MagicMock()
-        mock_client.submit_input.return_value = _make_submit_response()
-        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
 
         config = _make_mock_config()
         input_command(

@@ -67,14 +67,58 @@ def input_command(
 
     console = get_console()
 
-    # Confirmation prompt
-    confirmed = Confirm.ask(f'Submit input to node {node_id}?', default=True)
-    if not confirmed:
-        console.print('[yellow]Cancelled.[/yellow]')
-        return
-
-    # Call the API
     with WorkflowClient.from_config(config) as client:
+        # Pre-flight validation: check workflow state before prompting
+        status_resp = client.get_workflow_status(workflow_id, resolved_run_id)
+        nodes = client.list_nodes(workflow_id)
+
+        # Build node-type map (same pattern as review.py)
+        node_type_map: dict[str, str] = {}
+        for node in nodes:
+            nid = str(node.id)
+            config_type = (
+                node.config_type.value
+                if hasattr(node.config_type, 'value')
+                else str(node.config_type)
+            )
+            node_type_map[nid] = config_type
+
+        # Check node exists in this workflow
+        if node_id not in node_type_map:
+            raise ValueError(f'Node {node_id} not found in workflow {workflow_id}.')
+
+        # Check terminal states
+        overall_status = status_resp.status.upper()
+        state = status_resp.state
+        if overall_status in ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'):
+            raise ValueError(
+                f'Workflow has {overall_status.lower()}. '
+                f"Use 'workflow status' to see final results."
+            )
+
+        # Check if workflow is paused at a review node instead
+        if state.get('review_node_id'):
+            review_node_id = state.get('review_node_id')
+            raise ValueError(
+                f'Workflow is paused for review at node {review_node_id}. '
+                f"Use 'workflow review --run-id {resolved_run_id} "
+                f"--node-id {review_node_id} --approve' instead."
+            )
+
+        # Check the target node is actually waiting for input
+        if state.get('waiting_input_node_id') != node_id:
+            actual = state.get('waiting_input_node_id') or 'none'
+            raise ValueError(
+                f'Node {node_id} is not currently waiting for input. Current input node: {actual}'
+            )
+
+        # Confirmation prompt
+        confirmed = Confirm.ask(f'Submit input to node {node_id}?', default=True)
+        if not confirmed:
+            console.print('[yellow]Cancelled.[/yellow]')
+            return
+
+        # Call the API
         resp = client.submit_input(
             workflow_id,
             run_id=resolved_run_id,

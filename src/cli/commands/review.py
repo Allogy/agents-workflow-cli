@@ -106,6 +106,27 @@ def review_command(
             )
             node_type_map[nid] = config_type
 
+        state = status_resp.state
+
+        # Check terminal states (before node-level checks)
+        overall_status = status_resp.status.upper()
+        if overall_status in ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'):
+            raise ValueError(
+                f'Workflow has {overall_status.lower()}. '
+                f"Use 'workflow status' to see final results."
+            )
+
+        # Check wrong HITL type (workflow paused for input, not review)
+        waiting_input_node_id = state.get('waiting_input_node_id')
+        if waiting_input_node_id:
+            input_type = node_type_map.get(waiting_input_node_id, 'UNKNOWN')
+            raise ValueError(
+                f'Workflow is paused for input at node {waiting_input_node_id} '
+                f'(type: {input_type}). '
+                f"Use 'workflow input --node-id {waiting_input_node_id} "
+                f"--data '{{...}}'' instead."
+            )
+
         if node_id not in node_type_map:
             raise ValueError(f'Node {node_id} not found in workflow {workflow_id}.')
 
@@ -113,7 +134,6 @@ def review_command(
             raise ValueError(f'Node {node_id} is type {node_type_map[node_id]}, not HUMAN_REVIEW.')
 
         # Check that this node is actually paused for review
-        state = status_resp.state
         review_node_id = state.get('review_node_id')
         if review_node_id != node_id:
             # Find the actual review node if one exists
