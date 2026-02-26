@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -13,9 +13,11 @@ from cli.commands.run import (
     format_sse_event,
     parse_input_arg,
     resolve_workflow_id,
+    run_command,
     run_polling,
     run_streaming,
 )
+from cli.last_run import load_last_run
 from cli.sse import SSEEvent
 
 # ---------------------------------------------------------------------------
@@ -224,3 +226,41 @@ class TestRunStreaming:
         ]
         result = run_streaming(iter(lines))
         assert result == 'WAITING_FOR_REVIEW'
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunCommand:
+    def test_no_follow_mode_writes_last_run(self, tmp_path: Path) -> None:
+        """--no-follow starts workflow, writes .last_run, returns immediately."""
+        mock_client = MagicMock()
+        mock_client.start_workflow_temporal.return_value = MagicMock(
+            run_id='test-run-id',
+            workflow_id='wf-123',
+            status='RUNNING',
+        )
+
+        mock_config = MagicMock()
+        mock_config.host = 'https://api.example.com'
+        mock_config.org_id = 'org-123'
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=mock_config,
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=False,
+                no_follow=True,
+                working_dir=tmp_path,
+            )
+
+        # .last_run should have been written
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'test-run-id'

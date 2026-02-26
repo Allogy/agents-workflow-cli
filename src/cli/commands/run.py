@@ -23,7 +23,9 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid as uuid_mod
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,8 @@ import yaml
 from rich.console import Console
 
 from cli.client import WorkflowClient
+from cli.config import CLIConfig
+from cli.last_run import LastRunContext, save_last_run
 from cli.lockfile import load_lockfile
 from cli.sse import SSEEvent, parse_sse_line
 
@@ -247,3 +251,110 @@ def run_streaming(lines: Iterator[str]) -> str:
             return last_event_type
 
     return last_event_type
+
+
+# ---------------------------------------------------------------------------
+# Main orchestrator
+# ---------------------------------------------------------------------------
+
+
+def run_command(
+    config: CLIConfig,
+    identifier: str,
+    input_data: str | None,
+    *,
+    stream: bool = False,
+    no_follow: bool = False,
+    working_dir: Path | None = None,
+) -> None:
+    """Main entry point for the run command.
+
+    Args:
+        config: CLI configuration with API credentials.
+        identifier: Workflow UUID or name.
+        input_data: JSON string or @filepath for initial inputs.
+        stream: Use SSE streaming instead of polling.
+        no_follow: Fire-and-forget mode.
+        working_dir: Directory for .last_run file (defaults to cwd).
+    """
+    config.validate_for_api()
+    cwd = working_dir or Path.cwd()
+
+    # Parse input
+    inputs = parse_input_arg(input_data)
+
+    with WorkflowClient.from_config(config) as client:
+        # Resolve identifier to UUID
+        workflow_id = resolve_workflow_id(identifier, client, config.org_id, search_dir=cwd)
+
+        console.print(f'[bold cyan]Running workflow:[/bold cyan] {workflow_id}')
+
+        if stream:
+            # SSE streaming mode
+            run_id = str(uuid_mod.uuid4())
+            console.print(f'[dim]Run ID: {run_id}[/dim]')
+            console.print('[dim]Mode: SSE streaming[/dim]')
+            console.print()
+
+            # Write .last_run before starting
+            ctx = LastRunContext(
+                workflow_id=workflow_id,
+                run_id=run_id,
+                instance=config.host or '',
+                started_at=datetime.now(UTC),
+            )
+            save_last_run(cwd, ctx)
+
+            with client.stream_workflow_temporal(
+                workflow_id, run_id=run_id, inputs=inputs
+            ) as response:
+                final_status = run_streaming(response.iter_lines())
+
+        else:
+            # Start workflow (polling or no-follow)
+            start_resp = client.start_workflow_temporal(workflow_id, inputs=inputs)
+            run_id = start_resp.run_id
+
+            console.print(f'[dim]Run ID: {run_id}[/dim]')
+
+            # Write .last_run
+            ctx = LastRunContext(
+                workflow_id=workflow_id,
+                run_id=run_id,
+                instance=config.host or '',
+                started_at=datetime.now(UTC),
+            )
+            save_last_run(cwd, ctx)
+
+            if no_follow:
+                console.print(f'[green]Workflow started.[/green] Run ID: {run_id}')
+                console.print(f'[dim]Check status: workflow status {run_id}[/dim]')
+                return
+
+            # Polling mode
+            console.print('[dim]Mode: polling (2s interval)[/dim]')
+            console.print()
+            final_status = run_polling(client, workflow_id, run_id)
+
+        # Handle final status
+        _print_final_status(final_status, run_id)
+
+
+def _print_final_status(status: str, run_id: str) -> None:
+    """Print final status message with appropriate hints."""
+    if status in ('COMPLETED', 'RUN_FINISHED'):
+        console.print()
+        console.print('[bold green]✓ Workflow completed[/bold green]')
+    elif status in ('FAILED', 'RUN_ERROR'):
+        console.print()
+        console.print('[bold red]✗ Workflow failed[/bold red]')
+    elif status == 'WAITING_FOR_REVIEW':
+        console.print()
+        console.print('[bold yellow]⏸  Workflow paused — waiting for human review[/bold yellow]')
+        console.print(f'   Use: [cyan]workflow review {run_id} --approve[/cyan]')
+    elif status == 'WAITING_FOR_INPUT':
+        console.print()
+        console.print('[bold yellow]⏸  Workflow paused — waiting for input[/bold yellow]')
+        console.print(f"   Use: [cyan]workflow input {run_id} --data '{{...}}'[/cyan]")
+    else:
+        console.print(f'[dim]Final status: {status}[/dim]')
