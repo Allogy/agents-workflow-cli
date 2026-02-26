@@ -750,7 +750,7 @@ class TestRunStreamingNoColor:
     def test_no_color_strips_markup(self) -> None:
         """When Console(no_color=True) is used, output has no ANSI color codes."""
         buf = StringIO()
-        no_color_console = Console(file=buf, no_color=True, force_terminal=True)
+        no_color_console = Console(file=buf, no_color=True)
 
         event = SSEEvent(
             event_type='STEP_FINISHED',
@@ -760,8 +760,23 @@ class TestRunStreamingNoColor:
         no_color_console.print(line)
         output = buf.getvalue()
 
-        # Should NOT contain ANSI escape codes for colors
-        assert '\x1b[' not in output or 'green' not in output
+        # Should NOT contain ANSI escape codes AND no color markup words
+        assert '\x1b[' not in output and 'green' not in output
+
+
+class TestRunPollingNoColor:
+    def test_print_final_status_respects_no_color(self) -> None:
+        """_print_final_status uses output_console, not a module-level Console."""
+        buf = StringIO()
+        no_color_console = Console(file=buf, no_color=True)
+
+        _print_final_status('COMPLETED', 'run-123', output_console=no_color_console)
+        output = buf.getvalue()
+
+        # Must contain the completion message
+        assert 'Workflow completed' in output
+        # Must NOT contain ANSI escape codes
+        assert '\x1b[' not in output
 
 
 # ---------------------------------------------------------------------------
