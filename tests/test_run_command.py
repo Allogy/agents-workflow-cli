@@ -1080,3 +1080,91 @@ class TestRunCommandE2E:
         captured = capsys.readouterr()
         output = captured.out.lower()
         assert 'workflow status' in output or 'status' in output
+
+
+# ---------------------------------------------------------------------------
+# Audit gap-fill tests (02-03, Task 2)
+# ---------------------------------------------------------------------------
+
+
+class TestRunCommandAuditGaps:
+    """Tests filling remaining coverage gaps found during acceptance-criteria audit."""
+
+    def test_polling_mode_prints_run_id(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """RUN-01 gap: Console output contains 'Run ID' during polling execution."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='visible-run-id', workflow_id='wf-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                working_dir=tmp_path,
+            )
+
+        captured = capsys.readouterr()
+        output = captured.out
+        assert 'Run ID' in output
+        assert 'visible-run-id' in output
+
+    def test_streaming_mode_prints_run_id(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """RUN-04 gap: Streaming mode console output contains 'Run ID'."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "RUN_FINISHED"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                working_dir=tmp_path,
+            )
+
+        captured = capsys.readouterr()
+        output = captured.out
+        assert 'Run ID' in output
+
+    def test_no_follow_mode_does_not_poll(self, tmp_path: Path) -> None:
+        """--no-follow starts workflow and returns without polling."""
+        mock_client = _make_mock_client()
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                no_follow=True,
+                working_dir=tmp_path,
+            )
+
+        # get_workflow_status should never have been called (no polling)
+        mock_client.get_workflow_status.assert_not_called()

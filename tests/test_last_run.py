@@ -75,3 +75,27 @@ class TestLoadLastRun:
         )
         loaded = load_last_run(tmp_path)
         assert loaded is None
+
+
+class TestLastRunOverwrite:
+    def test_last_run_overwrite_latest_wins(self, tmp_path: Path) -> None:
+        """Overwriting .last_run silently replaces with latest run -- latest run wins."""
+        first = LastRunContext(
+            workflow_id=UUID('939843a8-6257-4475-bfc0-f7d6500d9f00'),
+            run_id='first-run-id',
+            instance='https://stage.sb.allogy.com',
+            started_at=datetime(2026, 2, 25, 10, 30, 0, tzinfo=UTC),
+        )
+        second = LastRunContext(
+            workflow_id=UUID('939843a8-6257-4475-bfc0-f7d6500d9f00'),
+            run_id='second-run-id',
+            instance='https://stage.sb.allogy.com',
+            started_at=datetime(2026, 2, 25, 11, 0, 0, tzinfo=UTC),
+        )
+
+        save_last_run(tmp_path, first)
+        save_last_run(tmp_path, second)
+
+        loaded = load_last_run(tmp_path)
+        assert loaded is not None
+        assert loaded.run_id == 'second-run-id'
