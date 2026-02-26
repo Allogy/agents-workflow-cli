@@ -12,9 +12,11 @@ from rich.console import Console
 from cli import __version__
 from cli.commands.delete import delete_command
 from cli.commands.init import init_command
+from cli.commands.input import input_command
 from cli.commands.list import list_command
 from cli.commands.pull import pull_workflow
 from cli.commands.push import push_workflow
+from cli.commands.review import review_command
 from cli.commands.run import run_command
 from cli.commands.status import status_command
 from cli.commands.validate import validate_command
@@ -480,6 +482,158 @@ def status(
     config = get_config()
     try:
         status_command(config, run_id, json_output=json_output)
+    except (ValueError, FileNotFoundError) as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(2) from e
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(1) from e
+
+
+@app.command(name='input')
+def input_cmd(
+    node_id: Annotated[
+        str,
+        typer.Option(
+            '--node-id',
+            help='ID of the INPUT node to submit data to.',
+        ),
+    ],
+    data: Annotated[
+        str | None,
+        typer.Option(
+            '--data',
+            '-d',
+            help='Input data as JSON string or @filepath.',
+        ),
+    ] = None,
+    run_id: Annotated[
+        str | None,
+        typer.Option(
+            '--run-id',
+            help='Run ID (overrides .last_run context).',
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            '--json',
+            help='Output raw JSON response.',
+        ),
+    ] = False,
+) -> None:
+    """Submit data to a paused INPUT node.
+
+    Sends input data to a workflow node that is waiting for human input.
+    Uses .workflow.last_run for workflow/run context by default.
+
+    The --data flag accepts inline JSON or @filepath syntax:
+        --data '{"key": "value"}'
+        --data @input.json
+
+    Requires interactive Y/N confirmation before sending.
+
+    Exit codes: 0 = success or cancelled, 1 = runtime error, 2 = user error
+
+    Examples:
+        workflow input --node-id abc-123 --data '{"text": "Hello"}'
+        workflow input --node-id abc-123 --data @input.json
+        workflow input --node-id abc-123 --data '{"text": "Hello"}' --json
+    """
+    config = get_config()
+    try:
+        input_command(config, node_id, data, run_id=run_id, json_output=json_output)
+    except (ValueError, FileNotFoundError) as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(2) from e
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def review(
+    run_id: Annotated[
+        str,
+        typer.Option(
+            '--run-id',
+            help='Run ID (required for review).',
+        ),
+    ],
+    node_id: Annotated[
+        str,
+        typer.Option(
+            '--node-id',
+            help='ID of the HUMAN_REVIEW node.',
+        ),
+    ],
+    approve: Annotated[
+        bool,
+        typer.Option(
+            '--approve',
+            help='Approve the review.',
+        ),
+    ] = False,
+    reject: Annotated[
+        bool,
+        typer.Option(
+            '--reject',
+            help='Reject the review.',
+        ),
+    ] = False,
+    revise: Annotated[
+        bool,
+        typer.Option(
+            '--revise',
+            help='Request revision.',
+        ),
+    ] = False,
+    comment: Annotated[
+        str | None,
+        typer.Option(
+            '--comment',
+            '-c',
+            help='Comment/feedback (required with --reject and --revise).',
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            '--json',
+            help='Output raw JSON response.',
+        ),
+    ] = False,
+) -> None:
+    """Submit a human review decision to a paused HUMAN_REVIEW node.
+
+    Validates that the specified node is actually a paused HUMAN_REVIEW
+    node before submitting. Requires both --run-id and --node-id.
+
+    Exactly one of --approve, --reject, or --revise must be specified.
+    The --reject and --revise flags require --comment.
+
+    Requires interactive Y/N confirmation before sending.
+
+    Exit codes: 0 = success or cancelled, 1 = runtime error, 2 = user error
+
+    Examples:
+        workflow review --run-id abc --node-id def --approve
+        workflow review --run-id abc --node-id def --reject --comment "Needs fixes"
+        workflow review --run-id abc --node-id def --revise --comment "Update section 3"
+        workflow review --run-id abc --node-id def --approve --json
+    """
+    config = get_config()
+    try:
+        review_command(
+            config,
+            run_id=run_id,
+            node_id=node_id,
+            approve=approve,
+            reject=reject,
+            revise=revise,
+            comment=comment,
+            json_output=json_output,
+        )
     except (ValueError, FileNotFoundError) as e:
         console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
