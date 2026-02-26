@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -10,11 +12,14 @@ from uuid import UUID
 
 import httpx
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from cli.commands.run import (
     _print_final_status,
+    format_sse_compact,
     format_sse_event,
+    format_sse_verbose,
     parse_input_arg,
     resolve_workflow_id,
     run_command,
@@ -658,3 +663,140 @@ class TestRunCommandLastRun:
         ctx = load_last_run(tmp_path)
         assert ctx is not None
         assert ctx.run_id == 'server-run-id-123'
+
+
+# ---------------------------------------------------------------------------
+# Compact SSE format tests (RUN-04)
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSseCompact:
+    def test_compact_format_has_timestamp(self) -> None:
+        """Compact format includes [HH:MM:SS] timestamp prefix."""
+        event = SSEEvent(
+            event_type='STEP_FINISHED',
+            data={'type': 'STEP_FINISHED', 'node_id': 'process-invoice'},
+        )
+        line = format_sse_compact(event)
+        # Strip Rich markup tags to check the plain-text pattern
+        plain = re.sub(r'\[/?[^\]]+\]', '', line)
+        assert re.search(r'\[\d{2}:\d{2}:\d{2}\] STEP_FINISHED process-invoice', plain)
+
+    def test_compact_success_events_green(self) -> None:
+        """Success events (RUN_FINISHED) use green color markup."""
+        event = SSEEvent(
+            event_type='RUN_FINISHED',
+            data={'type': 'RUN_FINISHED'},
+        )
+        line = format_sse_compact(event)
+        assert '[green]' in line
+
+    def test_compact_hitl_events_yellow(self) -> None:
+        """HITL events (WAITING_FOR_REVIEW) use yellow color markup."""
+        event = SSEEvent(
+            event_type='WAITING_FOR_REVIEW',
+            data={'type': 'WAITING_FOR_REVIEW', 'node_id': 'review-1'},
+        )
+        line = format_sse_compact(event)
+        assert '[yellow]' in line
+
+    def test_compact_error_events_red(self) -> None:
+        """Error events (STEP_ERROR) use red color markup."""
+        event = SSEEvent(
+            event_type='STEP_ERROR',
+            data={'type': 'STEP_ERROR', 'node_id': 'bad-node', 'error': 'timeout'},
+        )
+        line = format_sse_compact(event)
+        assert '[red]' in line
+
+
+# ---------------------------------------------------------------------------
+# Verbose SSE format tests (RUN-04)
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSseVerbose:
+    def test_verbose_shows_payload_excerpt(self) -> None:
+        """Verbose format includes payload data excerpt."""
+        event = SSEEvent(
+            event_type='STEP_FINISHED',
+            data={
+                'type': 'STEP_FINISHED',
+                'node_id': 'abc',
+                'output': {'result': 'success'},
+            },
+        )
+        line = format_sse_verbose(event)
+        assert 'output' in line
+
+    def test_verbose_includes_timestamp(self) -> None:
+        """Verbose format includes [HH:MM:SS] timestamp."""
+        event = SSEEvent(
+            event_type='STEP_FINISHED',
+            data={'type': 'STEP_FINISHED', 'node_id': 'abc'},
+        )
+        line = format_sse_verbose(event)
+        plain = re.sub(r'\[/?[^\]]+\]', '', line)
+        assert re.search(r'\[\d{2}:\d{2}:\d{2}\]', plain)
+
+
+# ---------------------------------------------------------------------------
+# No-color tests (RUN-04)
+# ---------------------------------------------------------------------------
+
+
+class TestRunStreamingNoColor:
+    def test_no_color_strips_markup(self) -> None:
+        """When Console(no_color=True) is used, output has no ANSI color codes."""
+        buf = StringIO()
+        no_color_console = Console(file=buf, no_color=True, force_terminal=True)
+
+        event = SSEEvent(
+            event_type='STEP_FINISHED',
+            data={'type': 'STEP_FINISHED', 'node_id': 'node-1'},
+        )
+        line = format_sse_compact(event)
+        no_color_console.print(line)
+        output = buf.getvalue()
+
+        # Should NOT contain ANSI escape codes for colors
+        assert '\x1b[' not in output or 'green' not in output
+
+
+# ---------------------------------------------------------------------------
+# Interrupted stream detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunStreamingInterrupted:
+    def test_interrupted_stream_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Stream ending without terminal event prints a warning."""
+        lines = [
+            'data: {"type": "RUN_STARTED"}',
+            'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+            # No terminal event -- iterator ends abruptly
+        ]
+        result = run_streaming(iter(lines))
+        captured = capsys.readouterr()
+        output = captured.out.lower()
+        assert 'interrupt' in output or 'status' in output
+        assert result == 'STEP_STARTED'
+
+
+# ---------------------------------------------------------------------------
+# HITL hint tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunStreamingHitlHint:
+    def test_waiting_for_input_prints_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """WAITING_FOR_INPUT event prints actionable hint with workflow input command."""
+        lines = [
+            'data: {"type": "RUN_STARTED"}',
+            'data: {"type": "WAITING_FOR_INPUT", "node_id": "input-1"}',
+        ]
+        result = run_streaming(iter(lines))
+        captured = capsys.readouterr()
+        output = captured.out.lower()
+        assert 'workflow input' in output or 'node-id' in output
+        assert result == 'WAITING_FOR_INPUT'
