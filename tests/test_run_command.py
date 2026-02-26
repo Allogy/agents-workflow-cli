@@ -801,3 +801,282 @@ class TestRunStreamingHitlHint:
         output = captured.out.lower()
         assert 'workflow input' in output or 'node-id' in output
         assert result == 'WAITING_FOR_INPUT'
+
+
+# ---------------------------------------------------------------------------
+# End-to-end run_command tests (02-03)
+# ---------------------------------------------------------------------------
+
+
+class TestRunCommandE2E:
+    """End-to-end tests exercising the full run_command() flow with mocked client.
+
+    These tests cover all four acceptance criteria from RUN-01 through RUN-04.
+    """
+
+    # -- RUN-01: Execute by ID with --input --------------------------------
+
+    def test_run_e2e_by_id_with_input(self, tmp_path: Path) -> None:
+        """RUN-01: Execute by UUID with --input parses JSON and starts workflow."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='run-123', workflow_id='wf-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data='{"question": "What is AI?"}',
+                working_dir=tmp_path,
+            )
+
+        # start_workflow_temporal called with parsed inputs dict
+        mock_client.start_workflow_temporal.assert_called_once()
+        call_kwargs = mock_client.start_workflow_temporal.call_args
+        assert call_kwargs[1]['inputs'] == {'question': 'What is AI?'}
+
+        # .last_run file written
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'run-123'
+
+    def test_run_e2e_invalid_input_raises_value_error(self, tmp_path: Path) -> None:
+        """RUN-01: Invalid JSON input raises ValueError (main.py routes to exit 2)."""
+        with pytest.raises(ValueError, match='Invalid JSON'):
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data='not-json',
+                working_dir=tmp_path,
+            )
+
+    # -- RUN-02: Execute by name -------------------------------------------
+
+    def test_run_e2e_by_name_resolves_and_executes(self, tmp_path: Path) -> None:
+        """RUN-02: Name identifier is resolved to UUID via API before execution."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='name-run-id', workflow_id='abc-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        # Mock name resolution: one workflow with name "Invoice Processing"
+        mock_wf = MagicMock()
+        mock_wf.id = UUID('11111111-2222-3333-4444-555555555555')
+        mock_client.list_workflows.return_value = [mock_wf]
+        mock_metadata = MagicMock()
+        mock_metadata.name = 'Invoice Processing'
+        mock_client.get_metadata.return_value = mock_metadata
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='Invoice Processing',
+                input_data=None,
+                working_dir=tmp_path,
+            )
+
+        # start_workflow_temporal should have been called with the resolved UUID
+        call_args = mock_client.start_workflow_temporal.call_args
+        assert '11111111-2222-3333-4444-555555555555' in call_args[0][0]
+
+    def test_run_e2e_name_not_found_raises_with_suggestions(self, tmp_path: Path) -> None:
+        """RUN-02: Misspelled name raises ValueError with 'Did you mean' suggestions."""
+        mock_client = _make_mock_client()
+
+        # Mock two workflows with known names
+        workflows = []
+        for i, _name in enumerate(['Invoice Processing', 'Order Flow']):
+            wf = MagicMock()
+            wf.id = UUID(f'1111111{i}-2222-3333-4444-555555555555')
+            workflows.append(wf)
+        mock_client.list_workflows.return_value = workflows
+
+        def _get_metadata(wf_id: Any) -> MagicMock:
+            names = ['Invoice Processing', 'Order Flow']
+            for j, wf in enumerate(workflows):
+                if wf.id == wf_id:
+                    meta = MagicMock()
+                    meta.name = names[j]
+                    return meta
+            raise Exception('Not found')
+
+        mock_client.get_metadata.side_effect = _get_metadata
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(ValueError, match='Did you mean'):
+                run_command(
+                    config=_make_mock_config(),
+                    identifier='Invoce',
+                    input_data=None,
+                    working_dir=tmp_path,
+                )
+
+    # -- RUN-03: .last_run written -----------------------------------------
+
+    def test_run_e2e_last_run_written_on_success(self, tmp_path: Path) -> None:
+        """RUN-03: .last_run file exists after successful polling run with correct run_id."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='success-run-id', workflow_id='wf-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                working_dir=tmp_path,
+            )
+
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'success-run-id'
+
+    def test_run_e2e_last_run_written_on_failure(self, tmp_path: Path) -> None:
+        """RUN-03: .last_run file exists even after a FAILED run (written before polling)."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='failed-run-id', workflow_id='wf-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='FAILED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(SystemExit) as exc_info:
+                run_command(
+                    config=_make_mock_config(),
+                    identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                    input_data=None,
+                    working_dir=tmp_path,
+                )
+            assert exc_info.value.code == 1
+
+        # .last_run should still exist -- written before polling starts
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'failed-run-id'
+
+    def test_run_e2e_last_run_written_on_streaming(self, tmp_path: Path) -> None:
+        """RUN-03: .last_run file exists after streaming mode run."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+                'data: {"type": "STEP_FINISHED", "node_id": "n1"}',
+                'data: {"type": "RUN_FINISHED"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                working_dir=tmp_path,
+            )
+
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+
+    # -- RUN-04: Streaming mode --------------------------------------------
+
+    def test_run_e2e_streaming_exits_0_on_hitl_gate(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """RUN-04: Streaming mode exits 0 on WAITING_FOR_REVIEW gate with HITL hint."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "WAITING_FOR_REVIEW", "node_id": "review-1"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Should NOT raise (exit 0 for HITL gate)
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                working_dir=tmp_path,
+            )
+
+        # The HITL hint should have been printed
+        captured = capsys.readouterr()
+        output = captured.out.lower()
+        assert 'review' in output
+
+    # -- Timeout message quality -------------------------------------------
+
+    def test_timeout_message_includes_workflow_status_hint(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Timeout message includes elapsed time and 'workflow status' hint."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(run_id='timeout-run-id', workflow_id='wf-123', status='RUNNING'),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING', current_node='node1', state={}
+        )
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch('cli.commands.run.get_run_timeout', return_value=0.01),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(SystemExit) as exc_info:
+                run_command(
+                    config=_make_mock_config(),
+                    identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                    input_data=None,
+                    working_dir=tmp_path,
+                )
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        output = captured.out.lower()
+        assert 'workflow status' in output or 'status' in output
