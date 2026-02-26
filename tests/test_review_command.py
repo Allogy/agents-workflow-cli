@@ -396,3 +396,126 @@ class TestReviewMissingRunId:
         )
 
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# UX-02: Terminal state rejection
+# ---------------------------------------------------------------------------
+
+
+class TestReviewTerminalState:
+    """UX-02: review on a completed/failed workflow raises ValueError."""
+
+    @patch('cli.commands.review.WorkflowClient')
+    def test_review_terminal_completed(self, mock_client_class, tmp_path):
+        """Review on a completed workflow raises ValueError with 'has completed'."""
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = WorkflowStatusResponse(
+            workflow_id=_WORKFLOW_ID,
+            run_id=_RUN_ID,
+            status='COMPLETED',
+            current_node=None,
+            state={
+                'execution_history': ['node-agent-1', _NODE_HR],
+                'node_outputs': {'node-agent-1': {}, _NODE_HR: {}},
+                'current_node_id': None,
+                'execution_status': 'COMPLETED',
+            },
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='has completed'):
+            review_command(
+                _make_mock_config(),
+                run_id=_RUN_ID,
+                node_id=_NODE_HR,
+                approve=True,
+                working_dir=tmp_path,
+            )
+
+        mock_client.submit_review.assert_not_called()
+
+    @patch('cli.commands.review.WorkflowClient')
+    def test_review_terminal_failed(self, mock_client_class, tmp_path):
+        """Review on a failed workflow raises ValueError with 'has failed'."""
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = WorkflowStatusResponse(
+            workflow_id=_WORKFLOW_ID,
+            run_id=_RUN_ID,
+            status='FAILED',
+            current_node=None,
+            state={
+                'execution_history': ['node-agent-1'],
+                'node_outputs': {},
+                'current_node_id': None,
+                'execution_status': 'FAILED',
+            },
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='has failed'):
+            review_command(
+                _make_mock_config(),
+                run_id=_RUN_ID,
+                node_id=_NODE_HR,
+                approve=True,
+                working_dir=tmp_path,
+            )
+
+        mock_client.submit_review.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UX-02: Wrong HITL type (input instead of review)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewWrongHitlType:
+    """UX-02: review on an input-paused workflow raises ValueError."""
+
+    @patch('cli.commands.review.WorkflowClient')
+    def test_review_wrong_hitl_input(self, mock_client_class, tmp_path):
+        """Review when workflow is paused for input raises ValueError suggesting 'workflow input'."""
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = WorkflowStatusResponse(
+            workflow_id=_WORKFLOW_ID,
+            run_id=_RUN_ID,
+            status='WAITING_FOR_INPUT',
+            current_node='node-input-1',
+            state={
+                'execution_history': ['node-agent-1'],
+                'node_outputs': {'node-agent-1': {}},
+                'current_node_id': 'node-input-1',
+                'execution_status': 'WAITING_FOR_INPUT',
+                'waiting_input_node_id': 'node-input-1',
+            },
+        )
+        mock_client.list_nodes.return_value = [
+            SimpleNamespace(id='node-agent-1', config_type=SimpleNamespace(value='AGENT')),
+            SimpleNamespace(
+                id='node-input-1', config_type=SimpleNamespace(value='PLAIN_TXT_INPUT')
+            ),
+            SimpleNamespace(id=_NODE_HR, config_type=SimpleNamespace(value='HUMAN_REVIEW')),
+        ]
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='paused for input') as exc_info:
+            review_command(
+                _make_mock_config(),
+                run_id=_RUN_ID,
+                node_id=_NODE_HR,
+                approve=True,
+                working_dir=tmp_path,
+            )
+
+        assert 'node-input-1' in str(exc_info.value)
+        assert 'workflow input' in str(exc_info.value)
+        mock_client.submit_review.assert_not_called()

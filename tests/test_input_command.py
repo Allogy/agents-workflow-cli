@@ -270,3 +270,138 @@ class TestInputNoLastRun:
                 data='{"text": "hello"}',
                 working_dir=tmp_path,
             )
+
+
+# ---------------------------------------------------------------------------
+# UX-02: Pre-flight validation for input command
+# ---------------------------------------------------------------------------
+
+
+class TestInputPreFlightValidation:
+    """UX-02: pre-flight validation rejects terminal states, wrong HITL types, wrong nodes."""
+
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_terminal_state_completed(self, mock_client_class, tmp_path):
+        """Input on a completed workflow raises ValueError with 'has completed'."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            status='COMPLETED',
+            waiting_input_node_id=None,
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='has completed'):
+            input_command(
+                _make_mock_config(),
+                node_id=_NODE_ID,
+                data='{"text": "hello"}',
+                working_dir=tmp_path,
+            )
+
+        mock_client.submit_input.assert_not_called()
+
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_wrong_hitl_type_review(self, mock_client_class, tmp_path):
+        """Input on a review-paused workflow raises ValueError suggesting 'workflow review'."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            status='WAITING_FOR_REVIEW',
+            waiting_input_node_id=None,
+            review_node_id='node-review-1',
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='paused for review') as exc_info:
+            input_command(
+                _make_mock_config(),
+                node_id=_NODE_ID,
+                data='{"text": "hello"}',
+                working_dir=tmp_path,
+            )
+
+        assert 'node-review-1' in str(exc_info.value)
+        assert 'workflow review' in str(exc_info.value)
+        mock_client.submit_input.assert_not_called()
+
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_wrong_node_id(self, mock_client_class, tmp_path):
+        """Input on wrong node raises ValueError with 'not currently waiting for input'."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            waiting_input_node_id='node-input-1',
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='not currently waiting for input'):
+            input_command(
+                _make_mock_config(),
+                node_id='node-agent-1',  # wrong node
+                data='{"text": "hello"}',
+                working_dir=tmp_path,
+            )
+
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_node_not_found(self, mock_client_class, tmp_path):
+        """Input with unknown node_id raises ValueError with 'not found'."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response()
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        with pytest.raises(ValueError, match='not found'):
+            input_command(
+                _make_mock_config(),
+                node_id='node-unknown-999',
+                data='{"text": "hello"}',
+                working_dir=tmp_path,
+            )
+
+
+# ---------------------------------------------------------------------------
+# UX-02: Pre-flight passes on valid state
+# ---------------------------------------------------------------------------
+
+
+class TestInputPreFlightPassesOnValidState:
+    """UX-02: pre-flight passes when state is valid, submit_input is called."""
+
+    @patch('cli.commands.input.Confirm.ask', return_value=True)
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_preflight_passes_and_submits(self, mock_client_class, mock_confirm, tmp_path):
+        """Valid pre-flight state allows submit_input to be called."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        input_command(
+            _make_mock_config(),
+            node_id=_NODE_ID,
+            data='{"text": "hello"}',
+            working_dir=tmp_path,
+        )
+
+        mock_client.submit_input.assert_called_once()
+        mock_client.get_workflow_status.assert_called_once()
+        mock_client.list_nodes.assert_called_once()

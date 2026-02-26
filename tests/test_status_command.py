@@ -238,3 +238,109 @@ class TestStatusPausedNodeHints:
         assert 'Tip:' in captured.out
         assert 'node-review-3' in captured.out
         assert '--approve' in captured.out
+
+
+# ---------------------------------------------------------------------------
+# UX-01: Rich Table output verification
+# ---------------------------------------------------------------------------
+
+
+class TestStatusRichTable:
+    """UX-01: verify Rich Table output with Node/Type/Status columns."""
+
+    @patch('cli.commands.status.WorkflowClient')
+    def test_status_rich_table_columns(self, mock_client_class, tmp_path, capsys):
+        """Rich Table has Node, Type, Status columns with node data."""
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            execution_history=['node-agent-1', 'node-input-2'],
+            node_outputs={'node-agent-1': {}, 'node-input-2': {}},
+            current_node_id='node-review-3',
+            execution_status='RUNNING',
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        status_command(_make_mock_config(), run_id=None, json_output=False, working_dir=tmp_path)
+
+        captured = capsys.readouterr()
+        # Rich Table headers
+        assert 'Node' in captured.out
+        assert 'Type' in captured.out
+        assert 'Status' in captured.out
+        # Node IDs appear (truncated to 8 chars + ...)
+        assert 'node-age' in captured.out  # node-agent-1 truncated
+        assert 'node-inp' in captured.out  # node-input-2 truncated
+        assert 'node-rev' in captured.out  # node-review-3 truncated
+        # Statuses appear
+        assert 'COMPLETED' in captured.out
+        assert 'RUNNING' in captured.out
+
+    @patch('cli.commands.status.WorkflowClient')
+    def test_status_summary_header(self, mock_client_class, tmp_path, capsys):
+        """Summary header shows workflow status and node completion progress."""
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            execution_history=['node-agent-1', 'node-input-2'],
+            node_outputs={'node-agent-1': {}, 'node-input-2': {}},
+            current_node_id='node-review-3',
+            execution_status='RUNNING',
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        status_command(_make_mock_config(), run_id=None, json_output=False, working_dir=tmp_path)
+
+        captured = capsys.readouterr()
+        # Summary header with status and progress
+        assert 'running' in captured.out  # overall_status.lower()
+        assert '2/3 nodes complete' in captured.out
+        assert _WORKFLOW_ID in captured.out
+
+
+# ---------------------------------------------------------------------------
+# UX-03: --no-color behavior
+# ---------------------------------------------------------------------------
+
+
+class TestStatusNoColor:
+    """UX-03: --no-color strips ANSI escape codes from output."""
+
+    @patch('cli.commands.status.WorkflowClient')
+    def test_status_no_color_strips_markup(self, mock_client_class, tmp_path, capsys):
+        """With _no_color=True, output has no ANSI escape codes."""
+        import cli.console
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response(
+            execution_history=['node-agent-1'],
+            node_outputs={'node-agent-1': {}},
+            current_node_id='node-input-2',
+            execution_status='RUNNING',
+        )
+        mock_client.list_nodes.return_value = _make_nodes()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        # Simulate --no-color flag
+        original = cli.console._no_color
+        try:
+            cli.console._no_color = True
+            status_command(
+                _make_mock_config(), run_id=None, json_output=False, working_dir=tmp_path
+            )
+        finally:
+            cli.console._no_color = original
+
+        captured = capsys.readouterr()
+        # No ANSI escape codes in output
+        assert '\x1b[' not in captured.out
+        # Content still present
+        assert 'Node' in captured.out
+        assert 'RUNNING' in captured.out
+        assert 'node-age' in captured.out  # truncated node ID
