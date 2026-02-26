@@ -391,3 +391,103 @@ class TestRunCommand:
         ctx = load_last_run(tmp_path)
         assert ctx is not None
         mock_client.stream_workflow_temporal.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Case-insensitive status tests (AUDIT-02)
+# ---------------------------------------------------------------------------
+
+
+class TestPollingCaseInsensitive:
+    def test_polling_exits_on_lowercase_completed(self) -> None:
+        """Polling terminates when backend returns lowercase 'completed'."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='completed', current_node=None, state={}
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'completed'
+
+    def test_polling_exits_on_lowercase_waiting_for_review(self) -> None:
+        """Polling terminates when backend returns lowercase 'waiting_for_review'."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='waiting_for_review', current_node='review_node', state={}
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'waiting_for_review'
+
+
+class TestStreamingCaseInsensitive:
+    def test_streaming_exits_on_lowercase_run_finished(self) -> None:
+        """Streaming terminates when event type is lowercase 'run_finished'."""
+        lines = [
+            'data: {"type": "run_finished"}',
+        ]
+        result = run_streaming(iter(lines))
+        assert result == 'run_finished'
+
+
+# ---------------------------------------------------------------------------
+# Timeout tests (AUDIT-03)
+# ---------------------------------------------------------------------------
+
+
+class TestPollingTimeout:
+    def test_polling_raises_on_timeout(self) -> None:
+        """Polling exits with code 1 after max_timeout_seconds elapses."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING', current_node='node1', state={}
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_polling(
+                mock_client,
+                'wf-id',
+                'run-id',
+                poll_interval=0.01,
+                max_timeout_seconds=0.05,
+            )
+        assert exc_info.value.code == 1
+
+
+class TestStreamingTimeout:
+    def test_streaming_raises_on_timeout(self) -> None:
+        """Streaming exits with code 1 after max_timeout_seconds elapses."""
+        import itertools
+
+        # Infinite iterator of non-terminal events
+        infinite_lines = itertools.cycle(
+            [
+                'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+            ]
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_streaming(infinite_lines, max_timeout_seconds=0.05)
+        assert exc_info.value.code == 1
+
+
+class TestTimeoutEnvVar:
+    def test_timeout_env_var_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WORKFLOW_RUN_TIMEOUT env var is read as timeout in seconds."""
+        from cli.config import get_run_timeout
+
+        monkeypatch.setenv('WORKFLOW_RUN_TIMEOUT', '60')
+        assert get_run_timeout() == 60
+
+    def test_timeout_cli_flag_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CLI flag takes precedence over env var."""
+        from cli.config import get_run_timeout
+
+        monkeypatch.setenv('WORKFLOW_RUN_TIMEOUT', '60')
+        assert get_run_timeout(cli_flag=120) == 120
+
+    def test_timeout_default_is_1800(self) -> None:
+        """Without env var or flag, default is 1800 seconds (30 min)."""
+        from cli.config import get_run_timeout
+
+        assert get_run_timeout() == 1800
