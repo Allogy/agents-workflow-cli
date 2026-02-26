@@ -27,7 +27,7 @@ from cli.client import WorkflowClient
 from cli.commands.run import parse_input_arg
 from cli.commands.status import _resolve_run_context
 from cli.config import CLIConfig
-from cli.main import get_console
+from cli.console import get_console
 
 
 def input_command(

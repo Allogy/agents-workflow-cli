@@ -28,7 +28,7 @@ from rich.prompt import Confirm
 from cli.client import WorkflowClient
 from cli.commands.status import _resolve_run_context
 from cli.config import CLIConfig
-from cli.main import get_console
+from cli.console import get_console
 
 # Decision label mapping for confirmation prompt and success message
 _DECISION_LABELS: dict[str, str] = {

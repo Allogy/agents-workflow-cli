@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
 
 from cli import __version__
 from cli.commands.delete import delete_command
@@ -21,6 +20,7 @@ from cli.commands.run import run_command
 from cli.commands.status import status_command
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
+from cli.console import get_console, set_no_color
 
 app = typer.Typer(
     name='workflow',
@@ -31,7 +31,6 @@ app = typer.Typer(
 
 # Module-level state (set by the callback)
 _config: CLIConfig | None = None
-_no_color: bool = False
 
 
 def get_config() -> CLIConfig:
@@ -39,15 +38,6 @@ def get_config() -> CLIConfig:
     if _config is None:
         return load_config()
     return _config
-
-
-def get_console() -> Console:
-    """Return a Rich Console respecting the global --no-color flag.
-
-    Rich Console natively honours the NO_COLOR environment variable,
-    so only the explicit CLI flag needs handling here.
-    """
-    return Console(no_color=True) if _no_color else Console()
 
 
 class FormatChoice(str, Enum):
@@ -116,9 +106,9 @@ def main(
     ] = False,
 ) -> None:
     """Agents Platform Workflow CLI."""
-    global _config, _no_color  # noqa: PLW0603
+    global _config  # noqa: PLW0603
 
-    _no_color = no_color
+    set_no_color(no_color)
 
     # Load base config from file + env vars, then apply CLI flag overrides
     base = load_config()

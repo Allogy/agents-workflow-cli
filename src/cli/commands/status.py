@@ -4,8 +4,9 @@ Shows overall workflow execution state and a per-node status breakdown.
 
 Features:
 - Status by .last_run context (default) or explicit run-id
-- Unified table: overall state + per-node rows with IDs, types, statuses
-- Paused-node visual markers and actionable hints
+- Rich Table with Node/Type/Status columns and color-coded status cells
+- Summary header with workflow status and node completion progress
+- Actionable hints for paused HITL nodes
 - --json flag for machine-readable output
 - Shared _resolve_run_context() helper for input/review commands
 
@@ -26,8 +27,8 @@ from rich.table import Table
 
 from cli.client import WorkflowClient, WorkflowStatusResponse
 from cli.config import CLIConfig
+from cli.console import get_console
 from cli.last_run import load_last_run
-from cli.main import get_console
 
 STATUS_STYLES: dict[str, str] = {
     'COMPLETED': 'green',

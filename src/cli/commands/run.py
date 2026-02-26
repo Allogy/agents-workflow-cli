@@ -39,9 +39,9 @@ from rich.console import Console
 
 from cli.client import WorkflowClient
 from cli.config import CLIConfig, get_run_timeout
+from cli.console import get_console
 from cli.last_run import LastRunContext, save_last_run
 from cli.lockfile import load_lockfile
-from cli.main import get_console
 from cli.sse import SSEEvent, parse_sse_line
 
 console = Console()
