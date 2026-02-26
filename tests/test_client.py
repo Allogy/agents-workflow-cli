@@ -732,3 +732,80 @@ class TestClientLifecycle:
     def test_custom_timeout(self):
         client = WorkflowClient(host=BASE_URL, api_key=API_KEY, org_id=ORG_ID, timeout=60.0)
         client.close()
+
+
+# ============================================================================
+# AUDIT-04: V2 Temporal Endpoints Use X-API-Key Authentication
+# ============================================================================
+
+
+class TestV2TemporalApiKeyAuth:
+    """Verify that V2 Temporal endpoints use X-API-Key header for authentication.
+
+    The backend's get_authenticated_user dependency accepts both JWT and API key
+    with a fall-through pattern (try JWT first, then API key). The CLI uses
+    X-API-Key exclusively, which is sufficient for all V2 endpoints.
+
+    Verified via backend source: authentication_manager.py:391
+
+    These tests confirm the client's auth mechanism without needing a live API.
+    AUDIT-04 requires proof that the existing X-API-Key approach works for V2.
+    """
+
+    def test_v2_temporal_uses_api_key_header(self):
+        """V2 Temporal endpoints use X-API-Key header for authentication.
+
+        The backend's get_authenticated_user dependency accepts both JWT and API key
+        with a fall-through pattern (try JWT first, then API key). The CLI uses
+        X-API-Key exclusively, which is sufficient for all V2 endpoints.
+
+        Verified via backend source: authentication_manager.py:391
+        """
+        client = WorkflowClient(host=BASE_URL, api_key=API_KEY, org_id=ORG_ID)
+        assert client._client.headers['x-api-key'] == API_KEY
+        client.close()
+
+    def test_v2_start_temporal_sends_request_to_correct_endpoint(
+        self, client: WorkflowClient, httpx_mock: HTTPXMock
+    ):
+        """V2 start/temporal sends POST with X-API-Key to correct V2 endpoint."""
+        httpx_mock.add_response(
+            url=f'{BASE_URL}/v2/workflows/{WORKFLOW_ID}/start/temporal',
+            json={
+                'workflow_id': WORKFLOW_ID,
+                'run_id': RUN_ID,
+                'temporal_workflow_id': 'temporal-123',
+                'status': 'started',
+                'message': 'Workflow started',
+            },
+        )
+        client.start_workflow_temporal(WORKFLOW_ID)
+
+        request = httpx_mock.get_requests()[0]
+        assert request.method == 'POST'
+        assert '/v2/workflows/' in str(request.url)
+        assert '/start/temporal' in str(request.url)
+        assert request.headers['x-api-key'] == API_KEY
+
+    def test_v2_status_sends_api_key_header(self, client: WorkflowClient, httpx_mock: HTTPXMock):
+        """V2 status endpoint sends GET with X-API-Key header."""
+        httpx_mock.add_response(
+            url=httpx.URL(
+                f'{BASE_URL}/v2/workflows/{WORKFLOW_ID}/status',
+                params={'run_id': RUN_ID},
+            ),
+            json={
+                'workflow_id': WORKFLOW_ID,
+                'run_id': RUN_ID,
+                'status': 'running',
+                'current_node': NODE_ID,
+                'state': {},
+            },
+        )
+        client.get_workflow_status(WORKFLOW_ID, RUN_ID)
+
+        request = httpx_mock.get_requests()[0]
+        assert request.method == 'GET'
+        assert '/v2/workflows/' in str(request.url)
+        assert '/status' in str(request.url)
+        assert request.headers['x-api-key'] == API_KEY
