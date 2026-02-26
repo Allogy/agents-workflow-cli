@@ -8,7 +8,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
+import httpx
 import pytest
+from typer.testing import CliRunner
 
 from cli.commands.run import (
     _print_final_status,
@@ -20,6 +22,7 @@ from cli.commands.run import (
     run_streaming,
 )
 from cli.last_run import load_last_run
+from cli.main import app
 from cli.sse import SSEEvent
 
 # ---------------------------------------------------------------------------
@@ -503,3 +506,153 @@ class TestTimeoutEnvVar:
         from cli.config import get_run_timeout
 
         assert get_run_timeout() == 1800
+
+
+# ---------------------------------------------------------------------------
+# Name resolution with suggestions tests (RUN-02)
+# ---------------------------------------------------------------------------
+
+
+class TestNameResolutionSuggestions:
+    def _make_client_with_names(self, names: list[str]) -> MagicMock:
+        """Create a mock client returning workflows with the given names."""
+        mock_client = MagicMock()
+        workflows = []
+        for i, _name in enumerate(names):
+            wf = MagicMock()
+            wf.id = UUID(f'1111111{i}-2222-3333-4444-555555555555')
+            workflows.append(wf)
+        mock_client.list_workflows.return_value = workflows
+
+        def _get_metadata(wf_id: Any) -> MagicMock:
+            for j, wf in enumerate(workflows):
+                if wf.id == wf_id:
+                    meta = MagicMock()
+                    meta.name = names[j]
+                    return meta
+            raise Exception('Not found')
+
+        mock_client.get_metadata.side_effect = _get_metadata
+        return mock_client
+
+    def test_name_resolution_suggests_close_matches(self) -> None:
+        """Misspelled name gets 'did you mean?' suggestions with original casing."""
+        client = self._make_client_with_names(['Invoice Processing', 'Invoice QA', 'Order Flow'])
+        with pytest.raises(ValueError, match='Did you mean') as exc_info:
+            resolve_workflow_id('Invoce', client, 'org-id')
+        # At least one suggestion should appear with original casing
+        msg = str(exc_info.value)
+        assert 'Invoice Processing' in msg or 'Invoice QA' in msg
+
+    def test_name_resolution_no_suggestions_when_no_close_match(self) -> None:
+        """Completely unrelated name gets no 'did you mean?' suggestions."""
+        client = self._make_client_with_names(['Invoice Processing', 'Invoice QA', 'Order Flow'])
+        with pytest.raises(ValueError, match='No workflow found matching') as exc_info:
+            resolve_workflow_id('zzz-no-match-zzz', client, 'org-id')
+        msg = str(exc_info.value)
+        assert 'Did you mean' not in msg
+
+    def test_name_resolution_case_insensitive(self) -> None:
+        """Exact match (case-insensitive) returns UUID without suggestions."""
+        client = self._make_client_with_names(['Invoice Processing'])
+        result = resolve_workflow_id('invoice processing', client, 'org-id')
+        assert result == '11111110-2222-3333-4444-555555555555'
+
+
+# ---------------------------------------------------------------------------
+# Exit code differentiation tests (RUN-01)
+# ---------------------------------------------------------------------------
+
+runner = CliRunner()
+
+
+class TestRunCommandExitCodes:
+    def test_invalid_json_exits_with_code_2(self) -> None:
+        """Invalid JSON --input exits with code 2 (user error, not 1)."""
+        result = runner.invoke(
+            app,
+            ['run', '939843a8-6257-4475-bfc0-f7d6500d9f00', '--input', 'not-json'],
+        )
+        assert result.exit_code == 2
+
+    def test_workflow_not_found_exits_with_code_2(self) -> None:
+        """Workflow not found exits with code 2 (user error, not 1)."""
+        mock_client = MagicMock()
+        mock_client.list_workflows.return_value = []
+        mock_client.list_nodes.return_value = []
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch('cli.main.load_config') as mock_load_config,
+        ):
+            mock_cfg = _make_mock_config()
+            mock_load_config.return_value = mock_cfg
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = runner.invoke(app, ['run', 'Nonexistent-Workflow'])
+        assert result.exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# Network retry tests (RUN-01)
+# ---------------------------------------------------------------------------
+
+
+class TestRunPollingRetry:
+    def test_network_error_retries_then_succeeds(self) -> None:
+        """Network error on first poll retries and succeeds on second."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = [
+            httpx.ConnectError('Connection refused'),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+
+        with patch('cli.commands.run.time.sleep'):
+            result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'COMPLETED'
+        assert mock_client.get_workflow_status.call_count == 2
+
+    def test_network_error_exhausts_retries_then_raises(self) -> None:
+        """Network errors exhaust retries and propagate the exception."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = httpx.ConnectError('Connection refused')
+
+        with patch('cli.commands.run.time.sleep'):
+            with pytest.raises((httpx.ConnectError, RuntimeError)):
+                run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+
+
+# ---------------------------------------------------------------------------
+# .last_run roundtrip verification tests (RUN-03)
+# ---------------------------------------------------------------------------
+
+
+class TestRunCommandLastRun:
+    def test_last_run_contains_server_run_id(self, tmp_path: Path) -> None:
+        """Polling mode .last_run file contains the server-returned run_id."""
+        mock_client = _make_mock_client(
+            start_resp=MagicMock(
+                run_id='server-run-id-123', workflow_id='wf-123', status='RUNNING'
+            ),
+        )
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=False,
+                no_follow=False,
+                working_dir=tmp_path,
+            )
+
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'server-run-id-123'
