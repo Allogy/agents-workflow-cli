@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -13,6 +15,7 @@ from cli.commands.push import (
     _is_uuid,
     build_node_parameters,
     generate_node_layout,
+    push_workflow,
     resolve_dependencies,
     wdf_to_api_payload,
 )
@@ -1164,3 +1167,229 @@ class TestLockfileDependencyCache:
 
         assert resolved['agent:Test Agent'] == UUID('12345678-1234-1234-1234-123456789012')
         mock_client.list_agents.assert_called_once()
+
+
+# ============================================================================
+# Push Orchestrator Tests — push_workflow() AC coverage
+# ============================================================================
+
+VALID_WORKFLOW_YAML = """\
+name: Test Workflow
+description: A simple workflow
+version: 1
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: Enter text
+  output:
+    type: structured_output
+    execution_mode: OUTPUT
+    config:
+      schema:
+        type: object
+        properties: {}
+edges:
+  - from: input
+    to: output
+entry: input
+exit: output
+"""
+
+
+class TestPushWorkflowOrchestratorRejectsInvalidYaml:
+    """Push command rejects invalid YAML before calling any API."""
+
+    def test_push_rejects_invalid_yaml(self, tmp_path: Path):
+        """push_workflow raises PushError for unparseable YAML."""
+        bad_yaml = tmp_path / 'bad.workflow.yaml'
+        bad_yaml.write_text('name: Broken\nnodes:\n  - [invalid yaml syntax')
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'org-123'
+
+        with pytest.raises(PushError, match='Failed to load workflow'):
+            push_workflow(bad_yaml, config)
+
+    def test_push_rejects_yaml_with_validation_errors(self, tmp_path: Path):
+        """push_workflow raises PushError when validation finds FAIL results."""
+        # Workflow with a cycle (which fails Cycle Detection check)
+        cycle_yaml = tmp_path / 'cycle.workflow.yaml'
+        cycle_yaml.write_text("""\
+name: Cycle Workflow
+version: 1
+nodes:
+  a:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config: {}
+  b:
+    type: llm_call
+    execution_mode: MESSAGES
+    config:
+      model: test
+      template: test
+edges:
+  - from: a
+    to: b
+  - from: b
+    to: a
+entry: a
+exit: b
+""")
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'org-123'
+
+        with pytest.raises(PushError, match='Local validation failed'):
+            push_workflow(cycle_yaml, config)
+
+
+class TestPushWorkflowOrchestratorCreatesLockfile:
+    """Push command creates .workflow.lock on first push."""
+
+    @patch('cli.commands.push.WorkflowClient')
+    def test_push_creates_lockfile_on_first_push(self, mock_client_class, tmp_path: Path):
+        """push_workflow creates a .workflow.lock file after successful push."""
+        yaml_file = tmp_path / 'test.workflow.yaml'
+        yaml_file.write_text(VALID_WORKFLOW_YAML)
+
+        # Setup mock client
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Mock successful API response
+        mock_response = MagicMock()
+        mock_response.workflow.id = UUID('11111111-2222-3333-4444-555555555555')
+        mock_response.workflow.organization_id = UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        push_workflow(yaml_file, config)
+
+        # Lockfile should have been created
+        lockfile_path = tmp_path / 'test.workflow.lock'
+        assert lockfile_path.exists()
+
+        # Read and verify lockfile content
+        from cli.lockfile import read_lockfile
+
+        lock = read_lockfile(lockfile_path)
+        assert lock.workflow_id == UUID('11111111-2222-3333-4444-555555555555')
+        assert lock.organization_id == UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+        assert len(lock.nodes) == 2  # input + output
+
+    @patch('cli.commands.push.WorkflowClient')
+    def test_push_uses_lockfile_for_idempotent_update(self, mock_client_class, tmp_path: Path):
+        """Subsequent push reads lockfile and sends workflow_id for update (not create)."""
+        yaml_file = tmp_path / 'test.workflow.yaml'
+        yaml_file.write_text(VALID_WORKFLOW_YAML)
+
+        # Create an existing lockfile (simulating first push already done)
+        from datetime import UTC, datetime
+
+        from cli.lockfile import WorkflowLock, write_lockfile
+
+        existing_lock = WorkflowLock(
+            workflow_id=UUID('11111111-2222-3333-4444-555555555555'),
+            organization_id=UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'),
+            version=1,
+            instance='https://api.example.com',
+            nodes={'input': UUID('22222222-0000-0000-0000-000000000000')},
+            edges={},
+            pushed_at=datetime.now(UTC),
+        )
+        lockfile_path = tmp_path / 'test.workflow.lock'
+        write_lockfile(lockfile_path, existing_lock)
+
+        # Setup mock client
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_response = MagicMock()
+        mock_response.workflow.id = UUID('11111111-2222-3333-4444-555555555555')
+        mock_response.workflow.organization_id = UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        push_workflow(yaml_file, config)
+
+        # Verify the API was called with workflow_id (update mode)
+        call_args = mock_client.save_complete_workflow.call_args
+        payload = call_args[0][0]
+        assert payload['workflow_id'] == str(UUID('11111111-2222-3333-4444-555555555555'))
+
+
+class TestPushWorkflowOrchestratorHandlesApiErrors:
+    """Push command handles API errors with meaningful messages."""
+
+    @patch('cli.commands.push.WorkflowClient')
+    def test_push_handles_api_error(self, mock_client_class, tmp_path: Path):
+        """push_workflow raises PushError when API call fails."""
+        yaml_file = tmp_path / 'test.workflow.yaml'
+        yaml_file.write_text(VALID_WORKFLOW_YAML)
+
+        # Setup mock client that raises on save
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.save_complete_workflow.side_effect = Exception('API connection refused')
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        with pytest.raises(PushError, match='API call failed'):
+            push_workflow(yaml_file, config)
+
+    @patch('cli.commands.push.WorkflowClient')
+    def test_push_handles_dependency_resolution_error(self, mock_client_class, tmp_path: Path):
+        """push_workflow raises PushError when agent dependency cannot be resolved."""
+        yaml_with_agent = tmp_path / 'agent.workflow.yaml'
+        yaml_with_agent.write_text("""\
+name: Agent Workflow
+version: 1
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: Enter text
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    label: My Agent
+    config:
+      agent_name: Nonexistent Agent
+edges:
+  - from: input
+    to: agent
+entry: input
+exit: agent
+""")
+
+        # Setup mock client — agent not found
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.list_agents.return_value = []
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        with pytest.raises(PushError, match='Nonexistent Agent'):
+            push_workflow(yaml_with_agent, config)
