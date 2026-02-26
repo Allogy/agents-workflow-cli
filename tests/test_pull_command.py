@@ -2172,3 +2172,186 @@ class TestReverseResolveWarnings:
 
         captured = capsys.readouterr()
         assert 'not found' not in captured.out
+
+
+# ============================================================================
+# Post-Pull Validation Tests
+# ============================================================================
+
+
+class TestPostPullValidation:
+    """Test that pull command validates YAML after writing and warns on failures.
+
+    AUDIT-05: Post-pull validation should warn about issues but still write the file.
+    The pull command always exits with code 0 even when validation finds problems.
+    """
+
+    @patch('cli.commands.pull.run_all_validations')
+    @patch('cli.commands.pull.WorkflowClient')
+    def test_pull_validates_yaml_after_writing(
+        self,
+        mock_client_class,
+        mock_run_validations,
+        mock_workflow,
+        mock_metadata,
+        mock_nodes,
+        mock_edges,
+        mock_agents,
+        tmp_path,
+    ):
+        """Pull should warn when validation finds FAIL results, but still exit 0."""
+        from cli.validation.runner import CheckResult, CheckStatus
+
+        mock_client = MagicMock()
+        mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
+        mock_client.list_nodes.return_value = mock_nodes
+        mock_client.list_edges.return_value = mock_edges
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = []
+        mock_client_class.from_config.return_value.__enter__.return_value = mock_client
+
+        # Simulate validation returning a FAIL result
+        mock_run_validations.return_value = [
+            CheckResult(check_name='YAML Syntax', status=CheckStatus.PASS),
+            CheckResult(
+                check_name='Cycle Detection',
+                status=CheckStatus.FAIL,
+                message='Cycle found: A -> B -> A',
+            ),
+        ]
+
+        output_file = tmp_path / 'test.workflow.yaml'
+        result = runner.invoke(
+            app,
+            [
+                '--host',
+                'https://api.example.com',
+                '--api-key',
+                'test-key',
+                '--org',
+                str(ORG_ID),
+                'pull',
+                str(WORKFLOW_ID),
+                '-o',
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0, (
+            f'CLI should exit 0 even with validation warnings: {result.output}'
+        )
+        assert 'Warning' in result.output
+        assert 'validation issues' in result.output
+        assert 'Cycle Detection' in result.output
+        mock_run_validations.assert_called_once()
+
+    @patch('cli.commands.pull.run_all_validations')
+    @patch('cli.commands.pull.WorkflowClient')
+    def test_pull_no_validation_warning_on_clean_yaml(
+        self,
+        mock_client_class,
+        mock_run_validations,
+        mock_workflow,
+        mock_metadata,
+        mock_nodes,
+        mock_edges,
+        mock_agents,
+        tmp_path,
+    ):
+        """Pull should not show warnings when all validation checks pass."""
+        from cli.validation.runner import CheckResult, CheckStatus
+
+        mock_client = MagicMock()
+        mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
+        mock_client.list_nodes.return_value = mock_nodes
+        mock_client.list_edges.return_value = mock_edges
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = []
+        mock_client_class.from_config.return_value.__enter__.return_value = mock_client
+
+        # Simulate all-PASS validation
+        mock_run_validations.return_value = [
+            CheckResult(check_name='YAML Syntax', status=CheckStatus.PASS),
+            CheckResult(check_name='WDF Schema Conformance', status=CheckStatus.PASS),
+            CheckResult(check_name='Graph Reachability', status=CheckStatus.PASS),
+        ]
+
+        output_file = tmp_path / 'test.workflow.yaml'
+        result = runner.invoke(
+            app,
+            [
+                '--host',
+                'https://api.example.com',
+                '--api-key',
+                'test-key',
+                '--org',
+                str(ORG_ID),
+                'pull',
+                str(WORKFLOW_ID),
+                '-o',
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert 'Warning' not in result.output
+        assert 'validation issues' not in result.output
+
+    @patch('cli.commands.pull.run_all_validations')
+    @patch('cli.commands.pull.WorkflowClient')
+    def test_pull_writes_file_even_when_validation_fails(
+        self,
+        mock_client_class,
+        mock_run_validations,
+        mock_workflow,
+        mock_metadata,
+        mock_nodes,
+        mock_edges,
+        mock_agents,
+        tmp_path,
+    ):
+        """Pull should write the YAML file to disk even when validation fails."""
+        from cli.validation.runner import CheckResult, CheckStatus
+
+        mock_client = MagicMock()
+        mock_client.get_workflow.return_value = mock_workflow
+        mock_client.get_metadata.return_value = mock_metadata
+        mock_client.list_nodes.return_value = mock_nodes
+        mock_client.list_edges.return_value = mock_edges
+        mock_client.list_agents.return_value = mock_agents
+        mock_client.list_knowledge_bases.return_value = []
+        mock_client_class.from_config.return_value.__enter__.return_value = mock_client
+
+        # Simulate validation with FAIL results
+        mock_run_validations.return_value = [
+            CheckResult(
+                check_name='WDF Schema Conformance',
+                status=CheckStatus.FAIL,
+                message='Schema validation failed',
+            ),
+        ]
+
+        output_file = tmp_path / 'test.workflow.yaml'
+        result = runner.invoke(
+            app,
+            [
+                '--host',
+                'https://api.example.com',
+                '--api-key',
+                'test-key',
+                '--org',
+                str(ORG_ID),
+                'pull',
+                str(WORKFLOW_ID),
+                '-o',
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert output_file.exists(), 'YAML file should be written even when validation fails'
+        # File should have content
+        content = output_file.read_text()
+        assert len(content) > 0

@@ -33,6 +33,7 @@ from workflow_models.wdf import EdgeDefinition, NodeDefinition, WorkflowDefiniti
 from cli.client import WorkflowClient
 from cli.config import CLIConfig
 from cli.lockfile import WorkflowLock, save_lockfile
+from cli.validation.runner import CheckStatus, run_all_validations
 from cli.wdf_yaml import dump_workflow_yaml
 
 console = Console()
@@ -967,6 +968,16 @@ def pull_workflow(
         yaml_content = dump_workflow_yaml(wdf)
         output_path.write_text(yaml_content)
         console.print('[green]✓[/green]')
+
+        # Step 6b: Validate pulled YAML (warn but still write -- file already on disk)
+        results = run_all_validations(yaml_content)
+        failures = [r for r in results if r.status == CheckStatus.FAIL]
+        if failures:
+            console.print()
+            console.print('[yellow]Warning:[/yellow] Pulled workflow has validation issues:')
+            for f in failures:
+                console.print(f'  [dim]-[/dim] {f.check_name}: {f.message}')
+            console.print('[dim]File written anyway.[/dim]')
 
         # Step 7: Write .workflow.lock
         console.print('[dim]Writing lockfile...[/dim]', end=' ')
