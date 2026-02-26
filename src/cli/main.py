@@ -16,6 +16,7 @@ from cli.commands.list import list_command
 from cli.commands.pull import pull_workflow
 from cli.commands.push import push_workflow
 from cli.commands.run import run_command
+from cli.commands.status import status_command
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
 
@@ -436,9 +437,52 @@ def run(
         )
     except (ValueError, FileNotFoundError) as e:
         # User errors: bad input, not found, invalid JSON -> exit 2
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
         # Runtime errors: network, server, timeout -> exit 1
-        console.print(f'[bold red]Error:[/bold red] {e}')
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def status(
+    run_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Run ID to check status for. Uses .last_run if omitted.',
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            '--json',
+            help='Output raw JSON response.',
+        ),
+    ] = False,
+) -> None:
+    """Check workflow execution status with node-by-node detail.
+
+    Shows overall workflow state and a per-node breakdown with IDs,
+    types, and statuses. Paused nodes are highlighted with actionable
+    hints for the next command.
+
+    Uses .workflow.last_run context by default. Pass a run ID as
+    argument to override, or use --json for machine-readable output.
+
+    Exit codes: 0 = success, 1 = runtime error, 2 = user error
+
+    Examples:
+        workflow status
+        workflow status a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        workflow status --json
+    """
+    config = get_config()
+    try:
+        status_command(config, run_id, json_output=json_output)
+    except (ValueError, FileNotFoundError) as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        raise typer.Exit(2) from e
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e
