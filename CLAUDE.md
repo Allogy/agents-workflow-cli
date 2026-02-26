@@ -17,6 +17,7 @@ uv run workflow pull <uuid-or-name>           # Export to YAML
 uv run workflow init                          # Scaffold from templates
 uv run workflow list                          # List workflows
 uv run workflow delete <uuid-or-name>         # Delete workflow
+uv run workflow run <uuid-or-name>            # Execute via Temporal
 uv run ruff check .                           # Lint
 uv run ruff format .                          # Format
 uv run pytest                                 # Run tests
@@ -35,6 +36,7 @@ For deep-dives, read the referenced docs:
 - `docs/validate-command.md` — 9 offline validation checks
 - `docs/push-command.md` — deploy with lockfile and dependency resolution
 - `docs/pull-command.md` — export workflows to YAML
+- `docs/run-command.md` — execute workflows via Temporal
 - `docs/codeartifact.md` — CodeArtifact publishing guide
 - `shared-models/README.md` — shared Pydantic models package
 
@@ -48,7 +50,9 @@ src/cli/
   lockfile.py          # .workflow.lock read/write
   wdf_yaml.py          # WDF YAML parsing/serialization
   exceptions.py        # CLI-specific exceptions
-  commands/             # One module per CLI command (init, validate, push, pull, list, delete)
+  last_run.py           # .workflow.last_run context file I/O
+  sse.py               # SSE event parsing for streaming mode
+  commands/             # One module per CLI command (init, validate, push, pull, list, delete, run)
   validation/           # Validation runner (9 offline checks)
   templates/            # Scaffold templates for `workflow init`
 

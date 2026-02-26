@@ -15,6 +15,7 @@ from cli.commands.init import init_command
 from cli.commands.list import list_command
 from cli.commands.pull import pull_workflow
 from cli.commands.push import push_workflow
+from cli.commands.run import run_command
 from cli.commands.validate import validate_command
 from cli.config import CLIConfig, load_config, resolve_config
 
@@ -343,6 +344,68 @@ def delete(
     config = get_config()
     try:
         delete_command(config, identifier, force)
+    except Exception as e:
+        console.print(f'[bold red]Error:[/bold red] {e}')
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def run(
+    identifier: Annotated[
+        str,
+        typer.Argument(
+            help='Workflow UUID or name to execute.',
+        ),
+    ],
+    input_data: Annotated[
+        str | None,
+        typer.Option(
+            '--input',
+            '-i',
+            help='Initial input data as JSON string or @filepath.',
+        ),
+    ] = None,
+    stream: Annotated[
+        bool,
+        typer.Option(
+            '--stream',
+            help='Use SSE streaming instead of polling.',
+        ),
+    ] = False,
+    no_follow: Annotated[
+        bool,
+        typer.Option(
+            '--no-follow',
+            help='Start the workflow and exit immediately.',
+        ),
+    ] = False,
+) -> None:
+    """Execute a workflow via Temporal runtime.
+
+    Starts a workflow execution and displays node-by-node progress.
+    Supports execution by UUID or workflow name.
+
+    Default mode polls for status every 2 seconds. Use --stream for
+    real-time SSE event display. Use --no-follow to start and exit
+    immediately.
+
+    When a human-in-the-loop gate is reached (INPUT or REVIEW node),
+    the command exits with a hint for the next action.
+
+    A .workflow.last_run context file is written for use by subsequent
+    workflow status/input/review commands.
+
+    Exit codes: 0 = success or HITL pause, 1 = failure
+
+    Examples:
+        workflow run 939843a8-6257-4475-bfc0-f7d6500d9f00
+        workflow run "Invoice Processing" --input '{"question": "What is AI?"}'
+        workflow run my-workflow --input @input.json --stream
+        workflow run my-workflow --no-follow
+    """
+    config = get_config()
+    try:
+        run_command(config, identifier, input_data, stream=stream, no_follow=no_follow)
     except Exception as e:
         console.print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e
