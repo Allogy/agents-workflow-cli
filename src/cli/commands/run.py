@@ -34,7 +34,7 @@ import yaml
 from rich.console import Console
 
 from cli.client import WorkflowClient
-from cli.config import CLIConfig
+from cli.config import CLIConfig, get_run_timeout
 from cli.last_run import LastRunContext, save_last_run
 from cli.lockfile import load_lockfile
 from cli.sse import SSEEvent, parse_sse_line
@@ -153,6 +153,33 @@ _TERMINAL_STATUSES = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'}
 _HITL_STATUSES = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
 
 
+def _format_duration(seconds: int) -> str:
+    """Format seconds into a human-friendly duration string.
+
+    Examples:
+        1800 -> "30m"
+        90 -> "1m 30s"
+        45 -> "45s"
+        3661 -> "1h 1m 1s"
+    """
+    if seconds <= 0:
+        return '0s'
+
+    parts: list[str] = []
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    if hours > 0:
+        parts.append(f'{hours}h')
+    if minutes > 0:
+        parts.append(f'{minutes}m')
+    if secs > 0 or not parts:
+        parts.append(f'{secs}s')
+
+    return ' '.join(parts)
+
+
 def run_polling(
     client: WorkflowClient,
     workflow_id: str,
@@ -160,6 +187,7 @@ def run_polling(
     *,
     total_nodes: int = 0,
     poll_interval: float = 2.0,
+    max_timeout_seconds: int | float | None = None,
 ) -> str:
     """Poll workflow status until terminal or HITL gate.
 
@@ -169,10 +197,17 @@ def run_polling(
         run_id: Run ID to poll.
         total_nodes: Total number of nodes for progress display.
         poll_interval: Seconds between polls (0 for tests).
+        max_timeout_seconds: Maximum wall-clock time before timeout.
+            Defaults to the value from get_run_timeout() (30 minutes).
 
     Returns:
         Final status string (COMPLETED, FAILED, WAITING_FOR_REVIEW, etc.).
+
+    Raises:
+        SystemExit: With code 1 if timeout is reached.
     """
+    timeout = max_timeout_seconds if max_timeout_seconds is not None else get_run_timeout()
+    start_time = time.monotonic()
     seen_nodes: list[str] = []
 
     while True:
@@ -192,11 +227,21 @@ def run_polling(
             else:
                 console.print(f'  [dim]{current_node}[/dim] ... {status.lower()}')
 
-        if status in _TERMINAL_STATUSES or status in _HITL_STATUSES:
+        # Normalize to uppercase for comparison (backend returns mixed case)
+        status_upper = status.upper()
+        if status_upper in _TERMINAL_STATUSES or status_upper in _HITL_STATUSES:
             return status
 
         if poll_interval > 0:
             time.sleep(poll_interval)
+
+        elapsed = time.monotonic() - start_time
+        if elapsed >= timeout:
+            console.print(
+                f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+            )
+            sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -248,16 +293,28 @@ def format_sse_event(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) ->
     return f'[dim]{t}[/dim]  {node_id}'
 
 
-def run_streaming(lines: Iterator[str], *, total_nodes: int = 0) -> str:
+def run_streaming(
+    lines: Iterator[str],
+    *,
+    total_nodes: int = 0,
+    max_timeout_seconds: int | float | None = None,
+) -> str:
     """Process SSE event lines until terminal or HITL event.
 
     Args:
         lines: Iterator of raw SSE lines (from httpx iter_lines or test data).
         total_nodes: Total number of nodes for progress display.
+        max_timeout_seconds: Maximum wall-clock time before timeout.
+            Defaults to the value from get_run_timeout() (30 minutes).
 
     Returns:
         Final event type string.
+
+    Raises:
+        SystemExit: With code 1 if timeout is reached.
     """
+    timeout = max_timeout_seconds if max_timeout_seconds is not None else get_run_timeout()
+    start_time = time.monotonic()
     last_event_type = 'UNKNOWN'
     seen_nodes: list[str] = []
 
@@ -274,8 +331,20 @@ def run_streaming(lines: Iterator[str], *, total_nodes: int = 0) -> str:
         console.print(format_sse_event(event, step=step, total_nodes=total_nodes))
         last_event_type = event.event_type
 
-        if last_event_type in _SSE_TERMINAL_EVENTS or last_event_type in _SSE_HITL_EVENTS:
+        # Normalize to uppercase for comparison (backend returns mixed case)
+        if (
+            last_event_type.upper() in _SSE_TERMINAL_EVENTS
+            or last_event_type.upper() in _SSE_HITL_EVENTS
+        ):
             return last_event_type
+
+        elapsed = time.monotonic() - start_time
+        if elapsed >= timeout:
+            console.print(
+                f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+            )
+            sys.exit(1)
 
     return last_event_type
 
@@ -373,8 +442,8 @@ def run_command(
         # Handle final status
         _print_final_status(final_status, run_id)
 
-        # Exit with code 1 for failure statuses
-        if final_status in _FAILURE_STATUSES:
+        # Exit with code 1 for failure statuses (case-insensitive)
+        if final_status.upper() in _FAILURE_STATUSES:
             sys.exit(1)
 
 
@@ -384,20 +453,21 @@ _FAILURE_STATUSES = {'FAILED', 'RUN_ERROR', 'CANCELLED', 'TIMED_OUT'}
 
 def _print_final_status(status: str, run_id: str) -> None:
     """Print final status message with appropriate hints."""
-    if status in ('COMPLETED', 'RUN_FINISHED'):
+    status_upper = status.upper()
+    if status_upper in ('COMPLETED', 'RUN_FINISHED'):
         console.print()
         console.print('[bold green]✓ Workflow completed[/bold green]')
-    elif status in ('FAILED', 'RUN_ERROR'):
+    elif status_upper in ('FAILED', 'RUN_ERROR'):
         console.print()
         console.print('[bold red]✗ Workflow failed[/bold red]')
-    elif status in ('CANCELLED', 'TIMED_OUT'):
+    elif status_upper in ('CANCELLED', 'TIMED_OUT'):
         console.print()
         console.print(f'[bold red]✗ Workflow {status.lower().replace("_", " ")}[/bold red]')
-    elif status == 'WAITING_FOR_REVIEW':
+    elif status_upper == 'WAITING_FOR_REVIEW':
         console.print()
         console.print('[bold yellow]⏸  Workflow paused — waiting for human review[/bold yellow]')
         console.print(f'   Use: [cyan]workflow review {run_id} --approve[/cyan]')
-    elif status == 'WAITING_FOR_INPUT':
+    elif status_upper == 'WAITING_FOR_INPUT':
         console.print()
         console.print('[bold yellow]⏸  Workflow paused — waiting for input[/bold yellow]')
         console.print(f"   Use: [cyan]workflow input {run_id} --data '{{...}}'[/cyan]")

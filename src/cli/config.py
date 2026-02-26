@@ -27,6 +27,10 @@ DEFAULT_CONFIG_PATH = Path.home() / '.workflow' / 'config.yaml'
 ENV_HOST = 'WORKFLOW_API_HOST'
 ENV_API_KEY = 'WORKFLOW_API_KEY'
 ENV_ORG_ID = 'WORKFLOW_ORG_ID'
+ENV_RUN_TIMEOUT = 'WORKFLOW_RUN_TIMEOUT'
+
+# Defaults
+DEFAULT_RUN_TIMEOUT_SECONDS = 1800  # 30 minutes
 
 
 class OutputFormat(str, Enum):
@@ -159,3 +163,27 @@ def resolve_config(
         org_id=org_id if org_id is not None else base.org_id,
         output_format=resolved_format,
     )
+
+
+def get_run_timeout(cli_flag: int | None = None) -> int:
+    """Resolve the run command timeout in seconds.
+
+    Precedence: CLI flag > env var (WORKFLOW_RUN_TIMEOUT) > default (1800s).
+
+    Args:
+        cli_flag: Timeout value from --timeout CLI flag, or None.
+
+    Returns:
+        Timeout in seconds.
+    """
+    if cli_flag is not None:
+        return cli_flag
+
+    env_val = _get_env(ENV_RUN_TIMEOUT)
+    if env_val is not None:
+        try:
+            return int(env_val)
+        except ValueError:
+            pass  # Fall through to default
+
+    return DEFAULT_RUN_TIMEOUT_SECONDS
