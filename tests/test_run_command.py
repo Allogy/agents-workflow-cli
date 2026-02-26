@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
@@ -52,6 +53,11 @@ class TestParseInputArg:
         """Invalid JSON string raises ValueError."""
         with pytest.raises(ValueError, match='Invalid JSON'):
             parse_input_arg('not json')
+
+    def test_non_dict_json_raises(self) -> None:
+        """JSON array raises ValueError (only objects accepted)."""
+        with pytest.raises(ValueError, match='expected an object'):
+            parse_input_arg('[1, 2, 3]')
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +137,19 @@ class TestRunPolling:
 
         result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
         assert result == 'COMPLETED'
+
+    def test_step_counter_with_total_nodes(self) -> None:
+        """Polling displays step counter when total_nodes is provided."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(status='RUNNING', current_node='node1', state={}),
+            MagicMock(status='RUNNING', current_node='node2', state={}),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', total_nodes=3, poll_interval=0)
+        assert result == 'COMPLETED'
+        assert mock_client.get_workflow_status.call_count == 3
 
     def test_failed_workflow(self) -> None:
         """Polling returns FAILED status."""
@@ -244,24 +263,34 @@ class TestPrintFinalStatus:
         _print_final_status('TIMED_OUT', 'run-id')
 
 
+def _make_mock_client(**overrides: Any) -> MagicMock:
+    """Create a mock WorkflowClient with sensible defaults."""
+    mock = MagicMock()
+    mock.list_nodes.return_value = overrides.get('nodes', [MagicMock(), MagicMock(), MagicMock()])
+    mock.start_workflow_temporal.return_value = overrides.get(
+        'start_resp',
+        MagicMock(run_id='test-run-id', workflow_id='wf-123', status='RUNNING'),
+    )
+    return mock
+
+
+def _make_mock_config() -> MagicMock:
+    """Create a mock CLIConfig."""
+    mock = MagicMock()
+    mock.host = 'https://api.example.com'
+    mock.org_id = 'org-123'
+    return mock
+
+
 class TestRunCommandExitCode:
     def test_failed_workflow_exits_with_code_1(self, tmp_path: Path) -> None:
         """Polling mode exits with code 1 when workflow fails."""
-        mock_client = MagicMock()
-        mock_client.start_workflow_temporal.return_value = MagicMock(
-            run_id='test-run-id',
-            workflow_id='wf-123',
-            status='RUNNING',
-        )
+        mock_client = _make_mock_client()
         mock_client.get_workflow_status.return_value = MagicMock(
             status='FAILED',
             current_node=None,
             state={},
         )
-
-        mock_config = MagicMock()
-        mock_config.host = 'https://api.example.com'
-        mock_config.org_id = 'org-123'
 
         with patch('cli.commands.run.WorkflowClient') as MockClient:
             MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
@@ -269,7 +298,7 @@ class TestRunCommandExitCode:
 
             with pytest.raises(SystemExit) as exc_info:
                 run_command(
-                    config=mock_config,
+                    config=_make_mock_config(),
                     identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
                     input_data=None,
                     stream=False,
@@ -282,23 +311,14 @@ class TestRunCommandExitCode:
 class TestRunCommand:
     def test_no_follow_mode_writes_last_run(self, tmp_path: Path) -> None:
         """--no-follow starts workflow, writes .last_run, returns immediately."""
-        mock_client = MagicMock()
-        mock_client.start_workflow_temporal.return_value = MagicMock(
-            run_id='test-run-id',
-            workflow_id='wf-123',
-            status='RUNNING',
-        )
-
-        mock_config = MagicMock()
-        mock_config.host = 'https://api.example.com'
-        mock_config.org_id = 'org-123'
+        mock_client = _make_mock_client()
 
         with patch('cli.commands.run.WorkflowClient') as MockClient:
             MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
             MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
 
             run_command(
-                config=mock_config,
+                config=_make_mock_config(),
                 identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
                 input_data=None,
                 stream=False,
@@ -310,3 +330,64 @@ class TestRunCommand:
         ctx = load_last_run(tmp_path)
         assert ctx is not None
         assert ctx.run_id == 'test-run-id'
+
+    def test_polling_completed_workflow(self, tmp_path: Path) -> None:
+        """Polling mode exits cleanly when workflow completes."""
+        mock_client = _make_mock_client()
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(status='RUNNING', current_node='node1', state={}),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Should not raise
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data='{"question": "test"}',
+                stream=False,
+                no_follow=False,
+                working_dir=tmp_path,
+            )
+
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        assert ctx.run_id == 'test-run-id'
+
+    def test_streaming_mode_writes_last_run(self, tmp_path: Path) -> None:
+        """SSE streaming mode writes .last_run and processes events."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+                'data: {"type": "STEP_FINISHED", "node_id": "n1"}',
+                'data: {"type": "RUN_FINISHED"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Should not raise
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                no_follow=False,
+                working_dir=tmp_path,
+            )
+
+        ctx = load_last_run(tmp_path)
+        assert ctx is not None
+        mock_client.stream_workflow_temporal.assert_called_once()

@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import BaseModel, Field
@@ -434,16 +434,20 @@ class WorkflowClient:
             ``temporal_workflow_id``, ``status``, and ``message``.
         """
         body: dict[str, Any] = {
+            'threadId': str(uuid4()),
+            'runId': str(uuid4()),
             'state': {'inputs': inputs or {}},
             'messages': [],
             'tools': [],
             'context': [],
-            'forwarded_props': [],
+            'forwardedProps': [],
         }
-        response = self._post(
+        response = self._client.post(
             f'/v2/workflows/{workflow_id}/start/temporal',
             json=body,
+            timeout=None,
         )
+        raise_for_status(response)
         return TemporalStartResponse.model_validate(response.json())
 
     @contextmanager
@@ -472,6 +476,7 @@ class WorkflowClient:
             over ``response.iter_lines()`` to consume SSE events.
         """
         body: dict[str, Any] = {
+            'threadId': str(uuid4()),
             'runId': run_id,
             'state': {'inputs': inputs or {}},
             'messages': [],

@@ -71,16 +71,19 @@ def load_last_run(directory: Path) -> LastRunContext | None:
     if not path.exists():
         return None
 
-    content = path.read_text()
-    lines = [line for line in content.split('\n') if not line.strip().startswith('#')]
-    data = yaml.safe_load('\n'.join(lines))
+    try:
+        content = path.read_text()
+        lines = [line for line in content.split('\n') if not line.strip().startswith('#')]
+        data = yaml.safe_load('\n'.join(lines))
 
-    if not isinstance(data, dict):
+        if not isinstance(data, dict):
+            return None
+
+        return LastRunContext(
+            workflow_id=UUID(data['workflow_id']),
+            run_id=data['run_id'],
+            instance=data['instance'],
+            started_at=datetime.fromisoformat(data['started_at']),
+        )
+    except (KeyError, ValueError, TypeError):
         return None
-
-    return LastRunContext(
-        workflow_id=UUID(data['workflow_id']),
-        run_id=data['run_id'],
-        instance=data['instance'],
-        started_at=datetime.fromisoformat(data['started_at']),
-    )

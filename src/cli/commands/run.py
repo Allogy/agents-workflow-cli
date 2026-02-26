@@ -68,7 +68,10 @@ def parse_input_arg(value: str | None) -> dict[str, Any]:
         file_path = Path(value[1:])
         if not file_path.exists():
             raise FileNotFoundError(f'Input file not found: {file_path}')
-        return json.loads(file_path.read_text())
+        result = json.loads(file_path.read_text())
+        if not isinstance(result, dict):
+            raise ValueError('Invalid JSON input: expected an object, got ' + type(result).__name__)
+        return result
 
     try:
         result = json.loads(value)
@@ -155,6 +158,7 @@ def run_polling(
     workflow_id: str,
     run_id: str,
     *,
+    total_nodes: int = 0,
     poll_interval: float = 2.0,
 ) -> str:
     """Poll workflow status until terminal or HITL gate.
@@ -163,18 +167,30 @@ def run_polling(
         client: WorkflowClient instance.
         workflow_id: UUID of the workflow.
         run_id: Run ID to poll.
+        total_nodes: Total number of nodes for progress display.
         poll_interval: Seconds between polls (0 for tests).
 
     Returns:
         Final status string (COMPLETED, FAILED, WAITING_FOR_REVIEW, etc.).
     """
+    seen_nodes: list[str] = []
+
     while True:
         status_resp = client.get_workflow_status(workflow_id, run_id)
         status = status_resp.status
 
         current_node = status_resp.current_node
+        if current_node and current_node not in seen_nodes:
+            seen_nodes.append(current_node)
+
         if current_node:
-            console.print(f'  [dim]{current_node}[/dim] ... {status.lower()}')
+            step = len(seen_nodes)
+            if total_nodes > 0:
+                console.print(
+                    f'  [dim][{step}/{total_nodes}][/dim] {current_node} ... {status.lower()}'
+                )
+            else:
+                console.print(f'  [dim]{current_node}[/dim] ... {status.lower()}')
 
         if status in _TERMINAL_STATUSES or status in _HITL_STATUSES:
             return status
@@ -191,11 +207,13 @@ _SSE_TERMINAL_EVENTS = {'RUN_FINISHED', 'RUN_ERROR'}
 _SSE_HITL_EVENTS = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
 
 
-def format_sse_event(event: SSEEvent) -> str:
+def format_sse_event(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) -> str:
     """Format an SSE event for console display.
 
     Args:
         event: Parsed SSE event.
+        step: Current step number (1-based) for progress display.
+        total_nodes: Total number of nodes for progress display.
 
     Returns:
         Formatted string for Rich console output.
@@ -203,17 +221,18 @@ def format_sse_event(event: SSEEvent) -> str:
     t = event.event_type
     node_id = event.data.get('node_id', '')
     step_type = event.data.get('step_type', '')
+    progress = f'[dim][{step}/{total_nodes}][/dim] ' if step > 0 and total_nodes > 0 else ''
 
     if t == 'RUN_STARTED':
         return '[green]▶ RUN_STARTED[/green]'
     if t == 'STEP_STARTED':
         suffix = f' ({step_type})' if step_type else ''
-        return f'[blue]⏳ STEP_STARTED[/blue]  {node_id}{suffix}'
+        return f'[blue]⏳ STEP_STARTED[/blue]  {progress}{node_id}{suffix}'
     if t == 'STEP_FINISHED':
-        return f'[green]✓ STEP_FINISHED[/green]  {node_id}'
+        return f'[green]✓ STEP_FINISHED[/green] {progress}{node_id}'
     if t == 'STEP_ERROR':
         error = event.data.get('error', 'unknown error')
-        return f'[red]✗ STEP_ERROR[/red]  {node_id}: {error}'
+        return f'[red]✗ STEP_ERROR[/red]  {progress}{node_id}: {error}'
     if t == 'WAITING_FOR_REVIEW':
         return f'[yellow]⏸ WAITING_FOR_REVIEW[/yellow] at {node_id}'
     if t == 'WAITING_FOR_INPUT':
@@ -229,23 +248,30 @@ def format_sse_event(event: SSEEvent) -> str:
     return f'[dim]{t}[/dim]  {node_id}'
 
 
-def run_streaming(lines: Iterator[str]) -> str:
+def run_streaming(lines: Iterator[str], *, total_nodes: int = 0) -> str:
     """Process SSE event lines until terminal or HITL event.
 
     Args:
         lines: Iterator of raw SSE lines (from httpx iter_lines or test data).
+        total_nodes: Total number of nodes for progress display.
 
     Returns:
         Final event type string.
     """
     last_event_type = 'UNKNOWN'
+    seen_nodes: list[str] = []
 
     for line in lines:
         event = parse_sse_line(line)
         if event is None:
             continue
 
-        console.print(format_sse_event(event))
+        node_id = event.data.get('node_id', '')
+        if node_id and event.event_type == 'STEP_STARTED' and node_id not in seen_nodes:
+            seen_nodes.append(node_id)
+
+        step = len(seen_nodes)
+        console.print(format_sse_event(event, step=step, total_nodes=total_nodes))
         last_event_type = event.event_type
 
         if last_event_type in _SSE_TERMINAL_EVENTS or last_event_type in _SSE_HITL_EVENTS:
@@ -290,6 +316,13 @@ def run_command(
 
         console.print(f'[bold cyan]Running workflow:[/bold cyan] {workflow_id}')
 
+        # Fetch node count for progress display
+        try:
+            nodes = client.list_nodes(workflow_id)
+            total_nodes = len(nodes)
+        except Exception:
+            total_nodes = 0
+
         if stream:
             # SSE streaming mode
             run_id = str(uuid_mod.uuid4())
@@ -309,7 +342,7 @@ def run_command(
             with client.stream_workflow_temporal(
                 workflow_id, run_id=run_id, inputs=inputs
             ) as response:
-                final_status = run_streaming(response.iter_lines())
+                final_status = run_streaming(response.iter_lines(), total_nodes=total_nodes)
 
         else:
             # Start workflow (polling or no-follow)
@@ -335,7 +368,7 @@ def run_command(
             # Polling mode
             console.print('[dim]Mode: polling (2s interval)[/dim]')
             console.print()
-            final_status = run_polling(client, workflow_id, run_id)
+            final_status = run_polling(client, workflow_id, run_id, total_nodes=total_nodes)
 
         # Handle final status
         _print_final_status(final_status, run_id)

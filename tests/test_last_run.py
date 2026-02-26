@@ -56,3 +56,22 @@ class TestLoadLastRun:
         """load_last_run returns None when file doesn't exist."""
         loaded = load_last_run(tmp_path)
         assert loaded is None
+
+    def test_malformed_file_returns_none(self, tmp_path: Path) -> None:
+        """load_last_run returns None for files with missing keys."""
+        path = tmp_path / '.workflow.last_run'
+        path.write_text('run_id: some-id\n')
+        loaded = load_last_run(tmp_path)
+        assert loaded is None
+
+    def test_invalid_uuid_returns_none(self, tmp_path: Path) -> None:
+        """load_last_run returns None when workflow_id is not a valid UUID."""
+        path = tmp_path / '.workflow.last_run'
+        path.write_text(
+            'workflow_id: not-a-uuid\n'
+            'run_id: some-id\n'
+            'instance: https://example.com\n'
+            'started_at: "2026-02-25T10:30:00+00:00"\n'
+        )
+        loaded = load_last_run(tmp_path)
+        assert loaded is None
