@@ -21,6 +21,7 @@ from cli.commands.run import (
     _format_duration_ms,
     _get_display_name,
     _print_final_status,
+    _print_summary_table,
     format_sse_compact,
     format_sse_event,
     format_sse_verbose,
@@ -241,7 +242,7 @@ class TestFormatSseEvent:
 
 class TestRunStreaming:
     def test_completed_stream(self) -> None:
-        """Streaming returns final status from events."""
+        """Streaming returns StreamResult with final_event from events."""
         lines = [
             'data: {"type": "RUN_STARTED"}',
             'data: {"type": "STEP_STARTED", "node_id": "n1"}',
@@ -249,7 +250,7 @@ class TestRunStreaming:
             'data: {"type": "RUN_FINISHED"}',
         ]
         result = run_streaming(iter(lines))
-        assert result == 'RUN_FINISHED'
+        assert result.final_event == 'RUN_FINISHED'
 
     def test_hitl_gate_stops_stream(self) -> None:
         """Streaming returns on WAITING_FOR_REVIEW."""
@@ -258,7 +259,7 @@ class TestRunStreaming:
             'data: {"type": "WAITING_FOR_REVIEW", "node_id": "r1"}',
         ]
         result = run_streaming(iter(lines))
-        assert result == 'WAITING_FOR_REVIEW'
+        assert result.final_event == 'WAITING_FOR_REVIEW'
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +453,7 @@ class TestStreamingCaseInsensitive:
             'data: {"type": "run_finished"}',
         ]
         result = run_streaming(iter(lines))
-        assert result == 'run_finished'
+        assert result.final_event == 'run_finished'
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +802,7 @@ class TestRunStreamingInterrupted:
         captured = capsys.readouterr()
         output = captured.out.lower()
         assert 'interrupt' in output or 'status' in output
-        assert result == 'STEP_STARTED'
+        assert result.final_event == 'STEP_STARTED'
 
 
 # ---------------------------------------------------------------------------
@@ -820,7 +821,7 @@ class TestRunStreamingHitlHint:
         captured = capsys.readouterr()
         output = captured.out.lower()
         assert 'workflow input' in output or 'node-id' in output
-        assert result == 'WAITING_FOR_INPUT'
+        assert result.final_event == 'WAITING_FOR_INPUT'
 
 
 # ---------------------------------------------------------------------------
@@ -1426,3 +1427,344 @@ class TestRunCommandAuditGaps:
 
         # get_workflow_status should never have been called (no polling)
         mock_client.get_workflow_status.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# StreamResult integration tests (06-02)
+# ---------------------------------------------------------------------------
+
+
+def _sse_line(event_type: str, **data: Any) -> str:
+    """Helper to create SSE data lines for tests."""
+    payload = {'type': event_type, **data}
+    return f'data: {json.dumps(payload)}'
+
+
+class TestRunStreamingStreamResult:
+    """Tests verifying run_streaming returns StreamResult with correct fields."""
+
+    def test_basic_return_type(self) -> None:
+        """Feed a minimal stream, assert return is StreamResult."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines))
+        assert isinstance(result, StreamResult)
+        assert result.final_event == 'RUN_FINISHED'
+        assert isinstance(result.nodes, list)
+
+    def test_node_accumulation(self) -> None:
+        """Feed STEP_STARTED + STEP_FINISHED, assert NodeResult accumulated."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line(
+                'STEP_STARTED',
+                node_slug='extract-data',
+                step_type='llm_call',
+                node_id='abc',
+            ),
+            _sse_line('STEP_FINISHED', node_id='abc', node_slug='extract-data', duration_ms=1500),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines))
+        assert len(result.nodes) == 1
+        assert result.nodes[0].display_name == 'extract-data'
+        assert result.nodes[0].step_type == 'llm_call'
+        assert result.nodes[0].status == 'finished'
+        assert result.nodes[0].duration_ms == 1500
+
+    def test_error_node(self) -> None:
+        """Feed STEP_STARTED + STEP_ERROR + RUN_ERROR, assert node has status='error'."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line(
+                'STEP_STARTED',
+                node_slug='bad-node',
+                step_type='api_call',
+                node_id='err1',
+            ),
+            _sse_line('STEP_ERROR', node_id='err1', node_slug='bad-node', error='timeout'),
+            _sse_line('RUN_ERROR', error='Workflow failed'),
+        ]
+        result = run_streaming(iter(lines))
+        assert result.final_event == 'RUN_ERROR'
+        assert len(result.nodes) == 1
+        assert result.nodes[0].status == 'error'
+        assert result.nodes[0].display_name == 'bad-node'
+
+    def test_multiple_nodes_accumulated(self) -> None:
+        """Multiple nodes are accumulated in order."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_slug='node-a', node_id='a1', step_type='llm_call'),
+            _sse_line('STEP_FINISHED', node_id='a1', node_slug='node-a', duration_ms=500),
+            _sse_line('STEP_STARTED', node_slug='node-b', node_id='b1', step_type='api_call'),
+            _sse_line('STEP_FINISHED', node_id='b1', node_slug='node-b', duration_ms=1200),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines))
+        assert len(result.nodes) == 2
+        names = [n.display_name for n in result.nodes]
+        assert 'node-a' in names
+        assert 'node-b' in names
+
+
+class TestClientSideDurationFallback:
+    """Tests for client-side duration fallback when backend omits duration_ms."""
+
+    def test_duration_from_backend(self) -> None:
+        """When backend provides duration_ms, it is used directly."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_id='n1', node_slug='node-1'),
+            _sse_line('STEP_FINISHED', node_id='n1', duration_ms=1000),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines))
+        assert result.nodes[0].duration_ms == 1000
+
+    def test_client_side_fallback(self) -> None:
+        """When backend omits duration_ms, client-side monotonic clock is used."""
+        # Calls: start_time, RUN_STARTED timeout, STEP_STARTED record, STEP_STARTED timeout,
+        #        STEP_FINISHED fallback, STEP_FINISHED timeout, RUN_FINISHED (terminal)
+        monotonic_values = iter([10.0, 10.0, 10.0, 10.0, 12.5, 12.5])
+
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_id='n1', node_slug='node-1'),
+            _sse_line('STEP_FINISHED', node_id='n1'),
+            _sse_line('RUN_FINISHED'),
+        ]
+        with patch('cli.commands.run.time.monotonic', side_effect=monotonic_values):
+            result = run_streaming(iter(lines), max_timeout_seconds=3600)
+        assert result.nodes[0].duration_ms == 2500
+
+    def test_error_node_client_side_fallback(self) -> None:
+        """STEP_ERROR also uses client-side fallback when backend omits duration_ms."""
+        # Calls: start_time, RUN_STARTED timeout, STEP_STARTED record, STEP_STARTED timeout,
+        #        STEP_ERROR fallback, STEP_ERROR timeout, RUN_ERROR (terminal)
+        monotonic_values = iter([10.0, 10.0, 10.0, 10.0, 13.0, 13.0])
+
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_id='n1', node_slug='node-1'),
+            _sse_line('STEP_ERROR', node_id='n1', error='failed'),
+            _sse_line('RUN_ERROR', error='Workflow failed'),
+        ]
+        with patch('cli.commands.run.time.monotonic', side_effect=monotonic_values):
+            result = run_streaming(iter(lines), max_timeout_seconds=3600)
+        assert result.nodes[0].status == 'error'
+        assert result.nodes[0].duration_ms == 3000
+
+
+class TestSummaryTable:
+    """Tests for the Rich summary table on RUN_FINISHED."""
+
+    def test_summary_printed_on_run_finished(self) -> None:
+        """Summary table appears in output when stream ends with RUN_FINISHED."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_id='n1', node_slug='extract'),
+            _sse_line('STEP_FINISHED', node_id='n1', duration_ms=500),
+            _sse_line('RUN_FINISHED'),
+        ]
+        run_streaming(iter(lines), output_console=console)
+        output = buf.getvalue()
+        assert 'Run Summary' in output
+
+    def test_summary_not_printed_on_run_error(self) -> None:
+        """Summary table does NOT appear when stream ends with RUN_ERROR."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('STEP_STARTED', node_id='n1', node_slug='extract'),
+            _sse_line('STEP_ERROR', node_id='n1', error='boom'),
+            _sse_line('RUN_ERROR', error='Workflow failed'),
+        ]
+        run_streaming(iter(lines), output_console=console)
+        output = buf.getvalue()
+        assert 'Run Summary' not in output
+
+    def test_print_summary_table_directly(self) -> None:
+        """_print_summary_table renders node data in table format."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        nodes = [
+            NodeResult(
+                node_id='abc',
+                display_name='extract-data',
+                step_type='llm_call',
+                status='finished',
+                duration_ms=1523,
+            ),
+            NodeResult(
+                node_id='def',
+                display_name='transform',
+                step_type='api_call',
+                status='error',
+                duration_ms=500,
+            ),
+        ]
+        _print_summary_table(nodes, console)
+        output = buf.getvalue()
+        assert 'Run Summary' in output
+        assert 'extract-data' in output
+        assert 'transform' in output
+
+    def test_print_summary_table_empty_list(self) -> None:
+        """_print_summary_table with empty list produces no output."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        _print_summary_table([], console)
+        output = buf.getvalue()
+        assert output == ''
+
+    def test_summary_table_shows_duration(self) -> None:
+        """Summary table formats duration correctly."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        nodes = [
+            NodeResult(
+                node_id='a',
+                display_name='fast-node',
+                step_type='llm_call',
+                status='finished',
+                duration_ms=250,
+            ),
+        ]
+        _print_summary_table(nodes, console)
+        output = buf.getvalue()
+        assert '250ms' in output
+
+    def test_summary_table_shows_dash_for_no_duration(self) -> None:
+        """Summary table shows '-' when duration_ms is None."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        nodes = [
+            NodeResult(
+                node_id='a',
+                display_name='no-duration',
+                step_type='llm_call',
+                status='started',
+            ),
+        ]
+        _print_summary_table(nodes, console)
+        output = buf.getvalue()
+        assert 'no-duration' in output
+
+
+class TestUnknownEventInStreaming:
+    """Tests for unknown SSE event handling during streaming."""
+
+    def test_unknown_event_renders_dim(self) -> None:
+        """Unknown event renders as dim text with event type."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('CUSTOM_THING', payload='hello'),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines), output_console=console)
+        output = buf.getvalue()
+        assert 'CUSTOM_THING' in output
+        assert result.final_event == 'RUN_FINISHED'
+
+    def test_unknown_event_does_not_crash(self) -> None:
+        """Stream continues past unknown events to reach terminal event."""
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('MYSTERY_EVENT', data_field='value'),
+            _sse_line('STEP_STARTED', node_id='n1'),
+            _sse_line('STEP_FINISHED', node_id='n1', duration_ms=100),
+            _sse_line('RUN_FINISHED'),
+        ]
+        result = run_streaming(iter(lines))
+        assert result.final_event == 'RUN_FINISHED'
+        assert len(result.nodes) == 1
+
+    def test_multiple_unknown_events_all_appear(self) -> None:
+        """Multiple unknown events all appear in output (no deduplication)."""
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        lines = [
+            _sse_line('RUN_STARTED'),
+            _sse_line('CUSTOM_A', info='first'),
+            _sse_line('CUSTOM_B', info='second'),
+            _sse_line('CUSTOM_C', info='third'),
+            _sse_line('RUN_FINISHED'),
+        ]
+        run_streaming(iter(lines), output_console=console)
+        output = buf.getvalue()
+        assert 'CUSTOM_A' in output
+        assert 'CUSTOM_B' in output
+        assert 'CUSTOM_C' in output
+
+
+class TestRunCommandWithStreamResult:
+    """Tests that run_command handles StreamResult correctly."""
+
+    def test_streaming_run_error_exits_with_code_1(self, tmp_path: Path) -> None:
+        """run_command with stream=True exits with code 1 on RUN_ERROR."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                _sse_line('RUN_STARTED'),
+                _sse_line('STEP_STARTED', node_id='n1'),
+                _sse_line('STEP_ERROR', node_id='n1', error='boom'),
+                _sse_line('RUN_ERROR', error='Workflow failed'),
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(SystemExit) as exc_info:
+                run_command(
+                    config=_make_mock_config(),
+                    identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                    input_data=None,
+                    stream=True,
+                    working_dir=tmp_path,
+                )
+            assert exc_info.value.code == 1
+
+    def test_streaming_run_finished_exits_cleanly(self, tmp_path: Path) -> None:
+        """run_command with stream=True exits cleanly on RUN_FINISHED."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                _sse_line('RUN_STARTED'),
+                _sse_line('STEP_STARTED', node_id='n1'),
+                _sse_line('STEP_FINISHED', node_id='n1', duration_ms=500),
+                _sse_line('RUN_FINISHED'),
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch('cli.commands.run.WorkflowClient') as MockClient:
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Should NOT raise
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                working_dir=tmp_path,
+            )
