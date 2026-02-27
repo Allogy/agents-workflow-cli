@@ -37,6 +37,7 @@ from typing import Any
 import httpx
 import yaml
 from rich.console import Console
+from rich.prompt import Confirm
 from rich.table import Table
 
 from cli.client import WorkflowClient
@@ -326,6 +327,70 @@ def run_polling(
                 f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
             )
             sys.exit(1)
+
+
+def _poll_until_next_event(
+    client: WorkflowClient,
+    workflow_id: str,
+    run_id: str,
+    *,
+    poll_interval: float = 2.5,
+    verbose: bool = False,
+    output_console: Console | None = None,
+    max_timeout_seconds: int | float | None = None,
+) -> str:
+    """Poll workflow status until terminal or next HITL state.
+
+    Unlike :func:`run_polling`, this function is designed for post-HITL-submission
+    monitoring and prints status transitions in a streaming-consistent format.
+
+    Args:
+        client: WorkflowClient for API calls.
+        workflow_id: UUID of the workflow.
+        run_id: Run identifier.
+        poll_interval: Seconds between polls (default 2.5).
+        verbose: Use verbose formatter (reserved for future use).
+        output_console: Console for output.
+        max_timeout_seconds: Maximum wall-clock time before timeout.
+
+    Returns:
+        Final status string (e.g. ``'COMPLETED'``, ``'WAITING_FOR_INPUT'``, etc.).
+
+    Raises:
+        SystemExit: With code 1 if timeout is reached.
+    """
+    out = output_console or get_console()
+    timeout = max_timeout_seconds if max_timeout_seconds is not None else get_run_timeout()
+    start_time = time.monotonic()
+    last_node = ''
+
+    # Brief initial delay to let backend process the HITL submission signal
+    # (Temporal signal processing is async — Pitfall 4 from research)
+    time.sleep(poll_interval * 0.5)
+
+    while True:
+        status_resp = _poll_with_retry(client, workflow_id, run_id, output_console=out)
+        status_upper = status_resp.status.upper()
+        current_node = status_resp.current_node or ''
+
+        if current_node and current_node != last_node:
+            ts = datetime.now().strftime('%H:%M:%S')
+            out.print(f'[dim][{ts}][/dim] [blue]Processing[/blue] {current_node}')
+
+        last_node = current_node
+
+        if status_upper in _TERMINAL_STATUSES or status_upper in _HITL_STATUSES:
+            return status_resp.status
+
+        elapsed = time.monotonic() - start_time
+        if elapsed >= timeout:
+            out.print(
+                f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+            )
+            sys.exit(1)
+
+        time.sleep(poll_interval)
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +754,139 @@ def run_streaming(
 
 
 # ---------------------------------------------------------------------------
+# Interactive HITL loop
+# ---------------------------------------------------------------------------
+
+
+def _run_interactive(
+    client: WorkflowClient,
+    workflow_id: str,
+    run_id: str,
+    initial_result: StreamResult,
+    *,
+    total_nodes: int = 0,
+    verbose: bool = False,
+    output_console: Console | None = None,
+    node_map: dict[str, tuple[str, str]] | None = None,
+) -> StreamResult:
+    """Interactive HITL loop: stream -> prompt -> submit -> poll -> repeat.
+
+    Orchestrates the full interactive session from initial SSE streaming
+    through all HITL gates until the workflow reaches a terminal state.
+
+    Args:
+        client: WorkflowClient for API calls.
+        workflow_id: UUID of the workflow.
+        run_id: Run ID for this execution.
+        initial_result: The StreamResult from the initial SSE streaming phase.
+        total_nodes: Total node count for progress display.
+        verbose: Use verbose formatter.
+        output_console: Console for output.
+        node_map: Optional pre-built ``{node_id: (slug, step_type)}`` map from list_nodes.
+
+    Returns:
+        StreamResult with final event and accumulated node results.
+    """
+    from cli.interactive import prompt_for_input, prompt_for_review
+
+    out = output_console or get_console()
+    result = initial_result
+
+    # Build node_id -> (slug, step_type) lookup
+    node_id_to_info: dict[str, tuple[str, str]] = {}
+    if node_map:
+        node_id_to_info = dict(node_map)
+    for nr in result.nodes:
+        if nr.node_id not in node_id_to_info:
+            node_id_to_info[nr.node_id] = (nr.display_name, nr.step_type)
+
+    while True:
+        event_upper = result.final_event.upper()
+
+        # Terminal states -- exit the loop
+        if event_upper in _SSE_TERMINAL_EVENTS or event_upper in _TERMINAL_STATUSES:
+            break
+
+        if event_upper == 'WAITING_FOR_INPUT':
+            # Get the paused node info from status API
+            status_resp = _poll_with_retry(client, workflow_id, run_id, output_console=out)
+            node_id = status_resp.state.get('waiting_input_node_id', '')
+            node_slug, step_type = node_id_to_info.get(node_id, (node_id, ''))
+
+            data = prompt_for_input(node_id, node_slug, step_type, console=out)
+            if data is None:
+                # User cancelled -- exit interactive loop
+                return result
+
+            # Submit with retry
+            try:
+                client.submit_input(workflow_id, run_id=run_id, node_id=node_id, input_data=data)
+                out.print('[green]Input submitted.[/green]')
+            except Exception as e:
+                out.print(f'[bold red]Error submitting input:[/bold red] {e}')
+                if Confirm.ask('Retry submission?', default=True):
+                    try:
+                        client.submit_input(
+                            workflow_id, run_id=run_id, node_id=node_id, input_data=data
+                        )
+                        out.print('[green]Input submitted.[/green]')
+                    except Exception as retry_err:
+                        out.print(f'[bold red]Retry failed:[/bold red] {retry_err}')
+                        return result
+                else:
+                    return result
+
+        elif event_upper == 'WAITING_FOR_REVIEW':
+            # Get the paused node info from status API
+            status_resp = _poll_with_retry(client, workflow_id, run_id, output_console=out)
+            node_id = status_resp.state.get('review_node_id', '')
+            node_slug, step_type = node_id_to_info.get(node_id, (node_id, ''))
+
+            review_result = prompt_for_review(node_id, node_slug, step_type, console=out)
+            if review_result is None:
+                # User cancelled -- exit interactive loop
+                return result
+
+            decision, comment = review_result
+            # Submit with retry
+            try:
+                client.submit_review(
+                    workflow_id, run_id=run_id, decision=decision, feedback=comment
+                )
+                out.print(f'[green]Review submitted: {decision}.[/green]')
+            except Exception as e:
+                out.print(f'[bold red]Error submitting review:[/bold red] {e}')
+                if Confirm.ask('Retry submission?', default=True):
+                    try:
+                        client.submit_review(
+                            workflow_id, run_id=run_id, decision=decision, feedback=comment
+                        )
+                        out.print(f'[green]Review submitted: {decision}.[/green]')
+                    except Exception as retry_err:
+                        out.print(f'[bold red]Retry failed:[/bold red] {retry_err}')
+                        return result
+                else:
+                    return result
+        else:
+            # Unknown HITL state -- break to avoid infinite loop
+            break
+
+        # Resume monitoring via polling
+        out.print()
+        out.print('[dim]Resuming workflow monitoring...[/dim]')
+        poll_status = _poll_until_next_event(
+            client,
+            workflow_id,
+            run_id,
+            verbose=verbose,
+            output_console=out,
+        )
+        result = StreamResult(final_event=poll_status, nodes=result.nodes)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -777,6 +975,40 @@ def run_command(
                     output_console=output_console,
                 )
                 final_status = result.final_event
+
+            # Interactive mode: handle HITL gates inline
+            if interactive and result.final_event.upper() in _SSE_HITL_EVENTS:
+                # Build node_id -> (slug, step_type) map from the full node list
+                node_map: dict[str, tuple[str, str]] = {}
+                try:
+                    node_list = client.list_nodes(workflow_id)
+                    for n in node_list:
+                        nid = str(n.id)
+                        slug = n.slug if hasattr(n, 'slug') else str(n.id)
+                        ntype = (
+                            n.config_type.value
+                            if hasattr(n.config_type, 'value')
+                            else str(n.config_type)
+                        )
+                        node_map[nid] = (slug, ntype)
+                except Exception:
+                    pass  # Fall back to StreamResult node info
+
+                result = _run_interactive(
+                    client,
+                    workflow_id,
+                    run_id,
+                    result,
+                    total_nodes=total_nodes,
+                    verbose=verbose,
+                    output_console=output_console,
+                    node_map=node_map if node_map else None,
+                )
+                final_status = result.final_event
+
+                # Print summary table for interactive runs that reach RUN_FINISHED
+                if result.final_event.upper() == 'RUN_FINISHED':
+                    _print_summary_table(result.nodes, output_console)
 
         else:
             # Start workflow (polling or no-follow)
