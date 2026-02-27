@@ -40,4 +40,7 @@ htmlcov/
 .ruff_cache/
 *.workflow.lock
 *.workflow.yaml
+!shared-models/examples/*.workflow.yaml
 .workflow.last_run
+.claude/agent-memory/code-reviewer/*.md
+docs/plans/*.md
