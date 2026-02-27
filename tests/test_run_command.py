@@ -29,6 +29,7 @@ from cli.commands.run import (
     format_sse_event,
     format_sse_verbose,
     format_unknown_event,
+    parse_file_input,
     parse_input_arg,
     resolve_workflow_id,
     run_command,
@@ -75,6 +76,50 @@ class TestParseInputArg:
         """JSON array raises ValueError (only objects accepted)."""
         with pytest.raises(ValueError, match='expected an object'):
             parse_input_arg('[1, 2, 3]')
+
+
+# ---------------------------------------------------------------------------
+# File input parsing tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseFileInput:
+    """Tests for file:// prefix parsing in --input."""
+
+    def test_single_file(self, tmp_path: Path) -> None:
+        """Single file:// path returns one-element list."""
+        f = tmp_path / 'report.pdf'
+        f.write_bytes(b'fake pdf')
+        result = parse_file_input(f'file://{f}')
+        assert result == [f]
+
+    def test_multiple_files(self, tmp_path: Path) -> None:
+        """Comma-separated file:// paths return multiple paths."""
+        f1 = tmp_path / 'a.pdf'
+        f1.write_bytes(b'pdf')
+        f2 = tmp_path / 'b.docx'
+        f2.write_bytes(b'docx')
+        result = parse_file_input(f'file://{f1},file://{f2}')
+        assert result == [f1, f2]
+
+    def test_nonexistent_raises(self) -> None:
+        """Non-existent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            parse_file_input('file:///nonexistent/file.pdf')
+
+    def test_not_a_file_raises(self, tmp_path: Path) -> None:
+        """Directory path raises ValueError."""
+        d = tmp_path / 'subdir'
+        d.mkdir()
+        with pytest.raises(ValueError, match='Not a file'):
+            parse_file_input(f'file://{d}')
+
+    def test_without_prefix_still_works(self, tmp_path: Path) -> None:
+        """Path without file:// prefix is also accepted."""
+        f = tmp_path / 'data.csv'
+        f.write_bytes(b'a,b')
+        result = parse_file_input(str(f))
+        assert result == [f]
 
 
 # ---------------------------------------------------------------------------

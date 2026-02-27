@@ -109,6 +109,39 @@ def parse_input_arg(value: str | None) -> dict[str, Any]:
     return result
 
 
+def parse_file_input(value: str) -> list[Path]:
+    """Parse a file:// prefixed input string into a list of file paths.
+
+    Supports:
+    - Single file: 'file:///path/to/file.pdf'
+    - Multiple files: 'file:///path/to/file1.pdf,file:///path/to/file2.docx'
+    - Bare paths without file:// prefix
+
+    Args:
+        value: Input string with file:// prefix(es), or bare path(s).
+
+    Returns:
+        List of validated Path objects.
+
+    Raises:
+        FileNotFoundError: If any file path doesn't exist.
+        ValueError: If a path is not a regular file.
+    """
+    parts = value.split(',')
+    paths: list[Path] = []
+    for part in parts:
+        raw = part.strip()
+        if raw.startswith('file://'):
+            raw = raw[len('file://') :]
+        p = Path(raw).expanduser()
+        if not p.exists():
+            raise FileNotFoundError(f'File not found: {p}')
+        if not p.is_file():
+            raise ValueError(f'Not a file: {p}')
+        paths.append(p)
+    return paths
+
+
 def resolve_workflow_id(
     identifier: str,
     client: WorkflowClient,
