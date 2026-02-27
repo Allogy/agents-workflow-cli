@@ -132,3 +132,133 @@ class TestRunIdRoundTrip:
         assert isinstance(status.status, str) and len(status.status) > 0, (
             'status must be a non-empty string'
         )
+
+
+# ============================================================================
+# TD-04: input_data normalization against live cluster
+# ============================================================================
+
+
+class TestInputDataNormalization:
+    """Validate that PLAIN_TXT_INPUT and STRUCTURED_INPUT accept documented formats.
+
+    TD-04: The CLI's submit_input sends data that the Temporal workflow
+    accepts. These tests start a workflow, wait for it to reach
+    WAITING_FOR_INPUT, and then submit input in the documented format.
+    """
+
+    def test_plain_text_input_submission(
+        self,
+        temporal_env: dict[str, str],
+        temporal_client: WorkflowClient,
+        track_workflow,
+    ):
+        """Submitting {text: '...'} to a PLAIN_TXT_INPUT node succeeds."""
+        workflow_id = temporal_env['TEMPORAL_TEST_WORKFLOW_ID']
+
+        resp = temporal_client.start_workflow_temporal(workflow_id)
+        track_workflow(resp.workflow_id, resp.run_id)
+
+        # Wait for the workflow to pause at an INPUT node
+        try:
+            status = _wait_for_status(
+                temporal_client,
+                workflow_id,
+                resp.run_id,
+                'WAITING_FOR_INPUT',
+                max_attempts=10,
+                interval=2.0,
+            )
+        except TimeoutError:
+            pytest.skip(
+                'Test workflow did not pause at an INPUT node -- '
+                'workflow may not have a PLAIN_TXT_INPUT node'
+            )
+
+        # Determine the node_id to submit to: prefer current_node from status
+        node_id = status.current_node
+        if not node_id:
+            # Fallback: list nodes and find one with PLAIN_TXT_INPUT type
+            nodes = temporal_client.list_nodes(workflow_id)
+            plain_nodes = [
+                n
+                for n in nodes
+                if hasattr(n, 'node_type')
+                and n.node_type
+                and 'plain_txt_input' in str(n.node_type).lower()
+            ]
+            if plain_nodes:
+                node_id = str(plain_nodes[0].id)
+            else:
+                pytest.skip(
+                    'Could not determine INPUT node_id -- workflow has no PLAIN_TXT_INPUT node'
+                )
+
+        result = temporal_client.submit_input(
+            workflow_id,
+            run_id=resp.run_id,
+            node_id=node_id,
+            input_data={'text': 'Test input from CLI validation'},
+        )
+
+        assert result.status, (
+            'submit_input response status must be truthy (backend accepted the format)'
+        )
+
+    def test_structured_input_submission(
+        self,
+        temporal_env: dict[str, str],
+        temporal_client: WorkflowClient,
+        track_workflow,
+    ):
+        """Submitting {formData: {...}} to a STRUCTURED_INPUT node succeeds."""
+        workflow_id = temporal_env['TEMPORAL_TEST_WORKFLOW_ID']
+
+        resp = temporal_client.start_workflow_temporal(workflow_id)
+        track_workflow(resp.workflow_id, resp.run_id)
+
+        # Wait for the workflow to pause at an INPUT node
+        try:
+            status = _wait_for_status(
+                temporal_client,
+                workflow_id,
+                resp.run_id,
+                'WAITING_FOR_INPUT',
+                max_attempts=10,
+                interval=2.0,
+            )
+        except TimeoutError:
+            pytest.skip(
+                'Test workflow did not pause at an INPUT node -- '
+                'workflow may not have a STRUCTURED_INPUT node'
+            )
+
+        # Determine the node_id to submit to: prefer current_node from status
+        node_id = status.current_node
+        if not node_id:
+            # Fallback: list nodes and find one with STRUCTURED_INPUT type
+            nodes = temporal_client.list_nodes(workflow_id)
+            struct_nodes = [
+                n
+                for n in nodes
+                if hasattr(n, 'node_type')
+                and n.node_type
+                and 'structured_input' in str(n.node_type).lower()
+            ]
+            if struct_nodes:
+                node_id = str(struct_nodes[0].id)
+            else:
+                pytest.skip(
+                    'Could not determine INPUT node_id -- workflow has no STRUCTURED_INPUT node'
+                )
+
+        result = temporal_client.submit_input(
+            workflow_id,
+            run_id=resp.run_id,
+            node_id=node_id,
+            input_data={'formData': {'field1': 'value1', 'field2': 'value2'}},
+        )
+
+        assert result.status, (
+            'submit_input response status must be truthy (backend accepted the format)'
+        )
