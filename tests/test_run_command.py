@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,10 @@ from cli.commands.run import (
     StreamResult,
     _format_duration_ms,
     _get_display_name,
+    _poll_until_next_event,
     _print_final_status,
     _print_summary_table,
+    _run_interactive,
     format_sse_compact,
     format_sse_event,
     format_sse_verbose,
@@ -1768,3 +1771,389 @@ class TestRunCommandWithStreamResult:
                 stream=True,
                 working_dir=tmp_path,
             )
+
+
+# ---------------------------------------------------------------------------
+# Interactive loop tests (07-02)
+# ---------------------------------------------------------------------------
+
+
+class TestRunInteractive:
+    """Integration tests for the interactive HITL dispatch in run_command."""
+
+    def test_interactive_dispatches_on_hitl_event(self, tmp_path: Path) -> None:
+        """run_command with interactive=True dispatches to _run_interactive on HITL event."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "WAITING_FOR_INPUT", "node_id": "input-1"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch(
+                'cli.commands.run._run_interactive',
+                return_value=StreamResult(final_event='RUN_FINISHED', nodes=[]),
+            ) as mock_interactive,
+            patch.object(sys.stdin, 'isatty', return_value=True),
+        ):
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                interactive=True,
+                working_dir=tmp_path,
+            )
+
+        mock_interactive.assert_called_once()
+
+    def test_non_interactive_skips_interactive_loop(self, tmp_path: Path) -> None:
+        """run_command with interactive=False does NOT call _run_interactive."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "WAITING_FOR_INPUT", "node_id": "input-1"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch('cli.commands.run._run_interactive') as mock_interactive,
+        ):
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                interactive=False,
+                working_dir=tmp_path,
+            )
+
+        mock_interactive.assert_not_called()
+
+    def test_interactive_terminal_event_skips_loop(self, tmp_path: Path) -> None:
+        """Interactive mode with terminal event (RUN_FINISHED) does NOT dispatch to loop."""
+        mock_client = _make_mock_client()
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                'data: {"type": "RUN_STARTED"}',
+                'data: {"type": "STEP_STARTED", "node_id": "n1"}',
+                'data: {"type": "STEP_FINISHED", "node_id": "n1"}',
+                'data: {"type": "RUN_FINISHED"}',
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch('cli.commands.run._run_interactive') as mock_interactive,
+            patch.object(sys.stdin, 'isatty', return_value=True),
+        ):
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                interactive=True,
+                working_dir=tmp_path,
+            )
+
+        mock_interactive.assert_not_called()
+
+
+class TestPollUntilNextEvent:
+    """Tests for the _poll_until_next_event function."""
+
+    def test_returns_on_terminal_status(self) -> None:
+        """Returns immediately on COMPLETED status."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED', current_node=None, state={}
+        )
+
+        with patch('cli.commands.run.time.sleep'):
+            result = _poll_until_next_event(mock_client, 'wf-id', 'run-id')
+        assert result == 'COMPLETED'
+
+    def test_returns_on_hitl_status(self) -> None:
+        """Returns on WAITING_FOR_INPUT after polling through RUNNING."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(status='RUNNING', current_node='node-1', state={}),
+            MagicMock(status='WAITING_FOR_INPUT', current_node='input-1', state={}),
+        ]
+
+        with patch('cli.commands.run.time.sleep'):
+            result = _poll_until_next_event(mock_client, 'wf-id', 'run-id')
+        assert result == 'WAITING_FOR_INPUT'
+
+    def test_timeout_exits(self) -> None:
+        """Exceeding max_timeout_seconds causes sys.exit(1)."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING', current_node='node-1', state={}
+        )
+
+        with (
+            patch('cli.commands.run.time.sleep'),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _poll_until_next_event(mock_client, 'wf-id', 'run-id', max_timeout_seconds=0)
+        assert exc_info.value.code == 1
+
+    def test_prints_node_transitions(self) -> None:
+        """Node changes are printed as processing status lines."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(status='RUNNING', current_node='node-a', state={}),
+            MagicMock(status='RUNNING', current_node='node-b', state={}),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+
+        buf = StringIO()
+        console = Console(file=buf, no_color=True)
+        with patch('cli.commands.run.time.sleep'):
+            _poll_until_next_event(mock_client, 'wf-id', 'run-id', output_console=console)
+        output = buf.getvalue()
+        assert 'node-a' in output
+        assert 'node-b' in output
+
+
+class TestRunInteractiveLoop:
+    """Unit tests for the _run_interactive orchestration function."""
+
+    def test_terminal_event_returns_immediately(self) -> None:
+        """Terminal initial_result (RUN_FINISHED) returns without prompting."""
+        mock_client = MagicMock()
+        initial = StreamResult(final_event='RUN_FINISHED', nodes=[])
+
+        result = _run_interactive(mock_client, 'wf-id', 'run-id', initial)
+        assert result.final_event == 'RUN_FINISHED'
+        # No API calls made
+        mock_client.get_workflow_status.assert_not_called()
+
+    def test_input_prompt_submit_and_poll_to_completion(self) -> None:
+        """WAITING_FOR_INPUT -> prompt -> submit -> poll -> COMPLETED."""
+        mock_client = MagicMock()
+        # Status API returns waiting node info
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='input-1',
+            state={'waiting_input_node_id': 'input-1'},
+        )
+        # submit_input succeeds
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_input',
+                return_value={'key': 'value'},
+            ),
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                return_value='COMPLETED',
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'input-1': ('my-input-node', 'user_input')},
+            )
+
+        assert result.final_event == 'COMPLETED'
+        mock_client.submit_input.assert_called_once()
+
+    def test_review_prompt_submit_and_poll_to_completion(self) -> None:
+        """WAITING_FOR_REVIEW -> prompt -> submit -> poll -> COMPLETED."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_REVIEW',
+            current_node='review-1',
+            state={'review_node_id': 'review-1'},
+        )
+        mock_client.submit_review.return_value = MagicMock(status='ok')
+
+        initial = StreamResult(final_event='WAITING_FOR_REVIEW', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_review',
+                return_value=('approve', None),
+            ),
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                return_value='COMPLETED',
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'review-1': ('my-review-node', 'human_review')},
+            )
+
+        assert result.final_event == 'COMPLETED'
+        mock_client.submit_review.assert_called_once_with(
+            'wf-id', run_id='run-id', decision='approve', feedback=None
+        )
+
+    def test_user_cancel_returns_current_result(self) -> None:
+        """User cancelling prompt (None) returns the current result."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='input-1',
+            state={'waiting_input_node_id': 'input-1'},
+        )
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch('cli.interactive.prompt_for_input', return_value=None),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(mock_client, 'wf-id', 'run-id', initial)
+
+        assert result.final_event == 'WAITING_FOR_INPUT'
+        mock_client.submit_input.assert_not_called()
+
+    def test_multiple_hitl_gates_in_sequence(self) -> None:
+        """Handles INPUT -> REVIEW -> COMPLETED in sequence."""
+        mock_client = MagicMock()
+        # First poll: waiting for input info; second poll: waiting for review info
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(
+                status='WAITING_FOR_INPUT',
+                current_node='input-1',
+                state={'waiting_input_node_id': 'input-1'},
+            ),
+            MagicMock(
+                status='WAITING_FOR_REVIEW',
+                current_node='review-1',
+                state={'review_node_id': 'review-1'},
+            ),
+        ]
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+        mock_client.submit_review.return_value = MagicMock(status='ok')
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_input',
+                return_value={'data': 'test'},
+            ),
+            patch(
+                'cli.interactive.prompt_for_review',
+                return_value=('approve', None),
+            ),
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                side_effect=['WAITING_FOR_REVIEW', 'COMPLETED'],
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={
+                    'input-1': ('my-input', 'user_input'),
+                    'review-1': ('my-review', 'human_review'),
+                },
+            )
+
+        assert result.final_event == 'COMPLETED'
+        mock_client.submit_input.assert_called_once()
+        mock_client.submit_review.assert_called_once()
+
+    def test_api_failure_with_retry_success(self) -> None:
+        """API failure on first submit, retry succeeds."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='input-1',
+            state={'waiting_input_node_id': 'input-1'},
+        )
+        mock_client.submit_input.side_effect = [
+            Exception('Network error'),
+            MagicMock(status='ok'),
+        ]
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_input',
+                return_value={'key': 'value'},
+            ),
+            patch('cli.commands.run.Confirm.ask', return_value=True),
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                return_value='COMPLETED',
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(mock_client, 'wf-id', 'run-id', initial)
+
+        assert result.final_event == 'COMPLETED'
+        assert mock_client.submit_input.call_count == 2
+
+    def test_api_failure_retry_declined_returns(self) -> None:
+        """API failure with user declining retry returns current result."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='input-1',
+            state={'waiting_input_node_id': 'input-1'},
+        )
+        mock_client.submit_input.side_effect = Exception('Network error')
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_input',
+                return_value={'key': 'value'},
+            ),
+            patch('cli.commands.run.Confirm.ask', return_value=False),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(mock_client, 'wf-id', 'run-id', initial)
+
+        assert result.final_event == 'WAITING_FOR_INPUT'
