@@ -372,7 +372,6 @@ def run(
         str | None,
         typer.Option(
             '--input',
-            '-i',
             help='Initial input data as JSON string or @filepath.',
         ),
     ] = None,
@@ -381,6 +380,14 @@ def run(
         typer.Option(
             '--stream',
             help='Use SSE streaming instead of polling.',
+        ),
+    ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            '--interactive',
+            '-i',
+            help='Enable interactive HITL mode for inline input/review prompts. Requires --stream.',
         ),
     ] = False,
     no_follow: Annotated[
@@ -418,8 +425,9 @@ def run(
     payload excerpts. Use --no-color to disable colored output
     (for CI pipelines or piped output).
 
-    When a human-in-the-loop gate is reached (INPUT or REVIEW node),
-    the command exits with a hint for the next action.
+    Use --interactive / -i with --stream to enable inline HITL prompts.
+    When a human-in-the-loop gate is reached, the CLI will prompt for
+    input or review decisions directly in the terminal instead of exiting.
 
     A .workflow.last_run context file is written for use by subsequent
     workflow status/input/review commands.
@@ -431,6 +439,8 @@ def run(
         workflow run "Invoice Processing" --input '{"question": "What is AI?"}'
         workflow run my-workflow --input @input.json --stream
         workflow run my-workflow --stream --verbose
+        workflow run my-workflow --stream --interactive
+        workflow run my-workflow --stream -i
         workflow run my-workflow --no-follow
         workflow run my-workflow --stream --no-color
     """
@@ -441,6 +451,7 @@ def run(
             identifier,
             input_data,
             stream=stream,
+            interactive=interactive,
             no_follow=no_follow,
             verbose=verbose,
             no_color=no_color,

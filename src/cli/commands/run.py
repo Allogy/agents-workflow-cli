@@ -699,6 +699,7 @@ def run_command(
     input_data: str | None,
     *,
     stream: bool = False,
+    interactive: bool = False,
     no_follow: bool = False,
     verbose: bool = False,
     no_color: bool = False,
@@ -711,6 +712,7 @@ def run_command(
         identifier: Workflow UUID or name.
         input_data: JSON string or @filepath for initial inputs.
         stream: Use SSE streaming instead of polling.
+        interactive: Enable interactive HITL mode (requires --stream + TTY).
         no_follow: Fire-and-forget mode.
         verbose: Use verbose multi-line SSE output.
         no_color: Disable colored output.
@@ -726,6 +728,12 @@ def run_command(
         output_console = Console(no_color=True)
     else:
         output_console = get_console()
+
+    # Validate interactive mode preconditions (--stream + TTY)
+    if interactive:
+        from cli.interactive import check_interactive_preconditions
+
+        check_interactive_preconditions(stream, interactive, console=output_console)
 
     # Parse input
     inputs = parse_input_arg(input_data)
