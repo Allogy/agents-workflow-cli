@@ -16,10 +16,15 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from cli.commands.run import (
+    NodeResult,
+    StreamResult,
+    _format_duration_ms,
+    _get_display_name,
     _print_final_status,
     format_sse_compact,
     format_sse_event,
     format_sse_verbose,
+    format_unknown_event,
     parse_input_arg,
     resolve_workflow_id,
     run_command,
@@ -992,6 +997,244 @@ class TestRunCommandE2E:
         ctx = load_last_run(tmp_path)
         assert ctx is not None
         assert ctx.run_id == 'failed-run-id'
+
+
+# ---------------------------------------------------------------------------
+# Enhanced formatter tests (06-01)
+# ---------------------------------------------------------------------------
+
+
+class TestGetDisplayName:
+    def test_node_slug_preferred_over_node_id(self) -> None:
+        """node_slug is preferred over node_id when both present."""
+        event = SSEEvent('STEP_STARTED', {'node_slug': 'extract-data', 'node_id': 'abc-123'})
+        assert _get_display_name(event) == 'extract-data'
+
+    def test_step_name_fallback(self) -> None:
+        """step_name used when node_slug absent."""
+        event = SSEEvent('STEP_STARTED', {'step_name': 'extract-data', 'node_id': 'abc-123'})
+        assert _get_display_name(event) == 'extract-data'
+
+    def test_node_id_fallback(self) -> None:
+        """node_id used when both node_slug and step_name absent."""
+        event = SSEEvent('STEP_STARTED', {'node_id': 'abc-123'})
+        assert _get_display_name(event) == 'abc-123'
+
+    def test_empty_data(self) -> None:
+        """Empty data returns empty string."""
+        event = SSEEvent('STEP_STARTED', {})
+        assert _get_display_name(event) == ''
+
+
+class TestFormatDurationMs:
+    def test_zero_ms(self) -> None:
+        assert _format_duration_ms(0) == '0ms'
+
+    def test_sub_second(self) -> None:
+        assert _format_duration_ms(523) == '523ms'
+
+    def test_just_under_1000(self) -> None:
+        assert _format_duration_ms(999) == '999ms'
+
+    def test_exactly_1000(self) -> None:
+        assert _format_duration_ms(1000) == '1s'
+
+    def test_integer_division(self) -> None:
+        """1523ms -> 1s (integer division to seconds)."""
+        assert _format_duration_ms(1523) == '1s'
+
+    def test_multi_minute(self) -> None:
+        """90000ms -> 1m 30s."""
+        assert _format_duration_ms(90000) == '1m 30s'
+
+
+class TestFormatUnknownEvent:
+    def test_short_payload_renders_complete(self) -> None:
+        """Short payload is rendered without truncation."""
+        event = SSEEvent('CUSTOM_EVENT', {'field': 'val'})
+        output = format_unknown_event(event)
+        assert 'CUSTOM_EVENT' in output
+        assert '"field"' in output
+
+    def test_long_payload_truncated(self) -> None:
+        """Long payload (>100 chars JSON) is truncated with ellipsis."""
+        data = {'key_' + str(i): 'value_' + str(i) * 10 for i in range(20)}
+        event = SSEEvent('CUSTOM_EVENT', data)
+        output = format_unknown_event(event)
+        assert output.endswith('...[/dim]')
+
+    def test_output_wrapped_in_dim(self) -> None:
+        """Output is wrapped in [dim] markup."""
+        event = SSEEvent('CUSTOM_EVENT', {'field': 'val'})
+        output = format_unknown_event(event)
+        assert output.startswith('[dim]')
+        assert output.endswith('[/dim]')
+
+
+class TestEnhancedCompactFormat:
+    def test_step_started_shows_step_type(self) -> None:
+        """STEP_STARTED shows step_type in parentheses."""
+        event = SSEEvent(
+            'STEP_STARTED',
+            {'node_slug': 'extract-data', 'step_type': 'llm_call', 'node_id': 'abc-123'},
+        )
+        output = format_sse_compact(event)
+        assert 'extract-data' in output
+        assert 'llm_call' in output
+
+    def test_step_finished_shows_duration(self) -> None:
+        """STEP_FINISHED shows formatted duration."""
+        event = SSEEvent(
+            'STEP_FINISHED',
+            {'node_slug': 'extract-data', 'duration_ms': 1523, 'node_id': 'abc-123'},
+        )
+        output = format_sse_compact(event)
+        assert 'extract-data' in output
+        assert '1s' in output
+
+    def test_step_error_shows_error_and_type(self) -> None:
+        """STEP_ERROR shows error message and error_type when present."""
+        event = SSEEvent(
+            'STEP_ERROR',
+            {
+                'node_slug': 'extract-data',
+                'error': 'LLM failed',
+                'error_type': 'ApplicationError',
+                'node_id': 'abc-123',
+            },
+        )
+        output = format_sse_compact(event)
+        assert 'LLM failed' in output
+        assert 'ApplicationError' in output
+
+    def test_step_error_without_error_type(self) -> None:
+        """STEP_ERROR without error_type shows only error, no 'None' in output."""
+        event = SSEEvent(
+            'STEP_ERROR',
+            {'node_slug': 'extract-data', 'error': 'LLM failed', 'node_id': 'abc-123'},
+        )
+        output = format_sse_compact(event)
+        assert 'LLM failed' in output
+        assert 'None' not in output
+
+    def test_run_error_shows_error_and_type(self) -> None:
+        """RUN_ERROR shows error message and error_type when present."""
+        event = SSEEvent(
+            'RUN_ERROR',
+            {'error': 'Workflow failed', 'error_type': 'ApplicationError'},
+        )
+        output = format_sse_compact(event)
+        assert 'Workflow failed' in output
+        assert 'ApplicationError' in output
+
+    def test_run_error_without_error_type(self) -> None:
+        """RUN_ERROR without error_type shows only error."""
+        event = SSEEvent(
+            'RUN_ERROR',
+            {'error': 'Workflow failed'},
+        )
+        output = format_sse_compact(event)
+        assert 'Workflow failed' in output
+        assert 'None' not in output
+
+
+class TestEnhancedVerboseFormat:
+    def test_step_error_multiline_expansion(self) -> None:
+        """STEP_ERROR expands to multi-line with Error: and Type: fields."""
+        event = SSEEvent(
+            'STEP_ERROR',
+            {
+                'node_slug': 'extract-data',
+                'error': 'LLM failed',
+                'error_type': 'ApplicationError',
+                'node_id': 'abc-123',
+            },
+        )
+        output = format_sse_verbose(event)
+        lines = output.split('\n')
+        # Should have Error: and Type: on separate lines
+        error_lines = [line for line in lines if 'Error:' in line]
+        type_lines = [line for line in lines if 'Type:' in line and 'step_type' not in line.lower()]
+        assert len(error_lines) >= 1
+        assert len(type_lines) >= 1
+
+    def test_step_error_with_code(self) -> None:
+        """STEP_ERROR with code shows Code: field."""
+        event = SSEEvent(
+            'STEP_ERROR',
+            {
+                'node_slug': 'extract-data',
+                'error': 'fail',
+                'error_type': 'AppError',
+                'code': 'RATE_LIMIT',
+                'node_id': 'abc-123',
+            },
+        )
+        output = format_sse_verbose(event)
+        assert 'Code:' in output
+        assert 'RATE_LIMIT' in output
+
+    def test_run_error_multiline_expansion(self) -> None:
+        """RUN_ERROR expands to multi-line with Error: and Type: fields."""
+        event = SSEEvent(
+            'RUN_ERROR',
+            {
+                'error': 'Workflow failed',
+                'error_type': 'ApplicationError',
+            },
+        )
+        output = format_sse_verbose(event)
+        lines = output.split('\n')
+        error_lines = [line for line in lines if 'Error:' in line]
+        type_lines = [line for line in lines if 'Type:' in line]
+        assert len(error_lines) >= 1
+        assert len(type_lines) >= 1
+
+
+class TestDataclasses:
+    def test_node_result_all_fields(self) -> None:
+        """NodeResult can be created with all fields."""
+        nr = NodeResult(
+            node_id='abc-123',
+            display_name='extract-data',
+            step_type='llm_call',
+            status='finished',
+            duration_ms=1523,
+        )
+        assert nr.node_id == 'abc-123'
+        assert nr.display_name == 'extract-data'
+        assert nr.step_type == 'llm_call'
+        assert nr.status == 'finished'
+        assert nr.duration_ms == 1523
+
+    def test_node_result_optional_duration(self) -> None:
+        """NodeResult works with duration_ms=None (default)."""
+        nr = NodeResult(
+            node_id='abc-123',
+            display_name='extract-data',
+            step_type='llm_call',
+            status='started',
+        )
+        assert nr.duration_ms is None
+
+    def test_stream_result_empty_nodes(self) -> None:
+        """StreamResult with final_event and empty nodes list."""
+        sr = StreamResult(final_event='RUN_FINISHED')
+        assert sr.final_event == 'RUN_FINISHED'
+        assert sr.nodes == []
+
+    def test_stream_result_with_nodes(self) -> None:
+        """StreamResult with populated nodes list."""
+        nr = NodeResult(
+            node_id='abc-123',
+            display_name='extract-data',
+            step_type='llm_call',
+            status='finished',
+            duration_ms=500,
+        )
+        sr = StreamResult(final_event='RUN_FINISHED', nodes=[nr])
+        assert len(sr.nodes) == 1
+        assert sr.nodes[0].display_name == 'extract-data'
 
     def test_run_e2e_last_run_written_on_streaming(self, tmp_path: Path) -> None:
         """RUN-03: .last_run file exists after streaming mode run."""
