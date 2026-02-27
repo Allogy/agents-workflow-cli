@@ -1,14 +1,14 @@
 # retrieval-pipeline.workflow.yaml
 # WDF equivalent of: backend/scripts/workflow_complete_tests/payloads/retrieval_pipeline.json
-# Pattern: STRUCTURED_INPUT -> RETRIEVE -> DOCUMENT_EXTRACTION -> LLM_CALL -> STRUCTURED_OUTPUT (5-node)
+# Pattern: STRUCTURED_INPUT -> RETRIEVE -> LLM_CALL (extract) -> LLM_CALL (summarize) -> STRUCTURED_OUTPUT (5-node)
 
 name: Retrieval Pipeline
-description: 5-node retrieval workflow — form input, vector search, document extraction, LLM summarization, structured output
+description: 5-node retrieval workflow — form input, vector search, content extraction, LLM summarization, structured output
 version: 1
 tags:
   - test
   - retrieve
-  - document-extraction
+  - llm-extraction
 
 nodes:
   search_form:
@@ -24,7 +24,7 @@ nodes:
             type: string
           max_results:
             title: Max Results
-            type: string
+            type: integer
             default: 5
         required:
           - query
@@ -34,19 +34,26 @@ nodes:
     execution_mode: FLOW
     label: Vector Search
     config:
-      knowledgeBaseId: effbf0b6-5123-4068-a4af-d1844d333a65
+      knowledge_base_name: YOUR_KNOWLEDGE_BASE_NAME
       topK: 5
       scoreThreshold: 0.7
       enableReranking: false
       includeMetadata: true
 
   content_extractor:
-    type: document_extraction
-    execution_mode: FLOW
+    type: llm_call
+    execution_mode: MESSAGES
     label: Content Extractor
     config:
-      extractTables: true
-      extractImages: false
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.0
+      maxTokens: 2048
+      template: |
+        Extract and organize the key content from these retrieved documents:
+        {{vector_search.output.text}}
+
+        Include any tables, structured data, and important details.
+        Present the content in a clear, organized format.
 
   summarizer:
     type: llm_call

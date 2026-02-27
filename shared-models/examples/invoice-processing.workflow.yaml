@@ -1,6 +1,6 @@
 # invoice-processing.workflow.yaml
 # Example: Document processing pipeline with extraction and human review.
-# Exercises: file_upload, document_extraction, llm_call, human_review
+# Exercises: file_upload, llm_call, human_review
 
 name: Invoice Processing Pipeline
 description: Extract data from uploaded invoices and route for approval
@@ -21,39 +21,36 @@ nodes:
       extractTables: true
 
   extract:
-    type: document_extraction
-    execution_mode: FLOW
+    type: llm_call
+    execution_mode: MESSAGES
     label: Extract Invoice Fields
     config:
-      extractionMethod: llm
-      fields:
-        - name: vendor_name
-          type: string
-          required: true
-        - name: invoice_number
-          type: string
-          required: true
-        - name: total_amount
-          type: number
-          required: true
-        - name: line_items
-          type: array
-          required: false
-      prompt: >
-        Extract the vendor name, invoice number, total amount,
-        and line items from this invoice document.
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      temperature: 0.0
+      maxTokens: 1024
+      template: |
+        Extract the following fields from this invoice document:
+        {{upload.output.text}}
+
+        Return a JSON object with these fields:
+        - vendor_name (string, required)
+        - invoice_number (string, required)
+        - total_amount (number, required)
+        - line_items (array of objects, optional)
+
+        Respond with only the JSON object.
 
   classify:
     type: llm_call
     execution_mode: MESSAGES
     label: Classify Invoice
     config:
-      model: anthropic.claude-sonnet-4-5-v2
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
       temperature: 0.0
       maxTokens: 200
       template: |
         Given the following invoice data:
-        {{extract.output.extractedData}}
+        {{extract.output.text}}
 
         Classify this invoice into one of: SUPPLIES, SERVICES, EQUIPMENT, OTHER.
         Respond with only the category name.

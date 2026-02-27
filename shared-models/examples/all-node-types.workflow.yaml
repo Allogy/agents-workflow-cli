@@ -1,16 +1,18 @@
 # all-node-types.workflow.yaml
-# Example: Exercises all 10 WDF node types in a single workflow.
+# Example: Exercises all 9 supported WDF node types in a single workflow.
 # This is a reference/test file — not a realistic workflow.
 #
 # Node types covered:
-#   1. plain_txt_input     6. llm_call
-#   2. structured_input    7. structured_output
+#   1. plain_txt_input    6. llm_call
+#   2. structured_input   7. structured_output
 #   3. file_upload         8. retrieve
-#   4. agent               9. document_extraction
-#   5. rag_agent          10. human_review
+#   4. agent               9. human_review
+#   5. rag_agent
+#
+# Note: document_extraction is not included — it is not supported by the CLI.
 
 name: All Node Types Reference
-description: A reference workflow exercising every WDF node type
+description: A reference workflow exercising every supported WDF node type
 version: 1
 tags:
   - reference
@@ -71,17 +73,27 @@ nodes:
     execution_mode: MESSAGES
     label: Knowledge Base Agent
     config:
-      agentId: kb-agent
-      knowledgeBaseIds:
-        - company-docs-kb
-        - faq-kb
+      agent_name: YOUR_AGENT_NAME
+      knowledge_base_names:
+        - YOUR_KNOWLEDGE_BASE_NAME
+
+  search_node:
+    type: retrieve
+    execution_mode: FLOW
+    label: Search Knowledge Base
+    config:
+      knowledge_base_name: YOUR_KNOWLEDGE_BASE_NAME
+      topK: 5
+      scoreThreshold: 0.7
+      enableReranking: false
+      includeMetadata: true
 
   llm_node:
     type: llm_call
     execution_mode: MESSAGES
     label: Classify and Summarize
     config:
-      model: anthropic.claude-sonnet-4-5-v2
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
       temperature: 0.3
       maxTokens: 2048
       topP: 0.9
@@ -96,7 +108,7 @@ nodes:
     execution_mode: OUTPUT
     label: Format Response
     config:
-      model: anthropic.claude-sonnet-4-5-v2
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
       schema:
         type: object
         properties:
@@ -106,41 +118,6 @@ nodes:
             type: number
           category:
             type: string
-
-  # --- Flow Nodes ---
-  search_node:
-    type: retrieve
-    execution_mode: FLOW
-    label: Search Knowledge Base
-    config:
-      knowledgeBaseId: company-docs-kb
-      topK: 5
-      scoreThreshold: 0.7
-      enableReranking: false
-      includeMetadata: true
-
-  extract_node:
-    type: document_extraction
-    execution_mode: FLOW
-    label: Extract Document Fields
-    config:
-      extractionMethod: llm
-      fields:
-        - name: title
-          type: string
-          required: true
-        - name: author
-          type: string
-          required: false
-        - name: date
-          type: string
-          required: false
-        - name: key_points
-          type: array
-          required: true
-      prompt: "Extract the title, author, date, and key points from this document."
-      extractTables: true
-      extractImages: false
 
   # --- Human Interaction Nodes ---
   review_node:
@@ -157,20 +134,21 @@ nodes:
       allowEdit: false
 
 edges:
+  # Main path: text_input -> agent -> rag -> llm -> output -> review
   - from: text_input
     to: agent_node
-  - from: form_input
-    to: search_node
-  - from: file_input
-    to: extract_node
   - from: agent_node
     to: rag_node
   - from: rag_node
     to: llm_node
+  # Parallel inputs feed into llm_node
+  - from: form_input
+    to: search_node
   - from: search_node
     to: llm_node
-  - from: extract_node
+  - from: file_input
     to: llm_node
+  # Output path
   - from: llm_node
     to: output_node
   - from: output_node

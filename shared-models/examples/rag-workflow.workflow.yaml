@@ -49,9 +49,9 @@ nodes:
     execution_mode: MESSAGES
     label: RAG Policies
     config:
-      agentId: c1abd69c-e5a5-4b63-b1e4-0cc94cafcedf
-      knowledgeBaseIds:
-        - effbf0b6-5123-4068-a4af-d1844d333a65
+      agent_name: YOUR_AGENT_NAME
+      knowledge_base_names:
+        - YOUR_KNOWLEDGE_BASE_NAME
       primaryInput: "{{summarizer.output.text}}"
 
 edges:
