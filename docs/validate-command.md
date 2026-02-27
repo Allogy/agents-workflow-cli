@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `workflow validate` command performs offline validation of `.workflow.yaml` files with no API calls. It runs 9 comprehensive checks to catch errors early in the authoring process.
+The `workflow validate` command performs offline validation of `.workflow.yaml` files with no API calls. It runs 10 comprehensive checks to catch errors early in the authoring process.
 
 ## Installation
 
@@ -36,7 +36,7 @@ uv run workflow validate workflows/*.workflow.yaml || exit 1
 
 ## Validation Checks
 
-The command runs 9 validation checks:
+The command runs 10 validation checks:
 
 | # | Check | What It Does | Status Type |
 |---|-------|--------------|-------------|
@@ -49,12 +49,27 @@ The command runs 9 validation checks:
 | 7 | **Cycle Detection** | Detects circular dependencies (DFS 3-color algorithm, excludes RECURSIVE edges) | FAIL |
 | 8 | **Variable References** | Validates `{{slug.output.field}}` references point to existing nodes | FAIL |
 | 9 | **Node Config Validation** | Validates node-type-specific config (e.g., LLM_CALL requires `model` and `template`) | FAIL |
+| 10 | **Unsupported Node Types** | Detects use of node types not supported by the CLI (e.g., `document_extraction`) | FAIL |
 
 ### Status Types
 
 - **✓ PASS** (green) — Check passed
 - **⚠ WARN** (yellow) — Non-blocking issue detected (e.g., unreachable nodes)
 - **✗ FAIL** (red) — Blocking error that prevents workflow execution
+
+### Check 10: Unsupported Node Types
+
+Verifies that no nodes use types that are not supported by the CLI.
+
+Currently unsupported types:
+- `document_extraction` — legacy node type not supported for CLI execution
+
+**Status:** FAIL if any unsupported node types are found.
+
+**Example error:**
+```
+FAIL  Unsupported Node Types  Unsupported node types found: extract (document_extraction)
+```
 
 ## Output Format
 
@@ -75,9 +90,10 @@ Validating: my-workflow.workflow.yaml
 │ Edge References        │ ✓ PASS │                           │
 │ Entry/Exit Points      │ ✓ PASS │                           │
 │ Node Config Validation │ ✓ PASS │                           │
+│ Unsupported Node Types │ ✓ PASS │                           │
 └────────────────────────┴────────┴───────────────────────────┘
 
-Validation failed: 1 failures, 0 warnings, 8 passed
+Validation failed: 1 failures, 0 warnings, 9 passed
 ```
 
 ## Common Validation Errors
@@ -138,6 +154,18 @@ nodes.llm.config.template: Field required
 
 **Fix:** Add the required field to the node's config block
 
+### 7. Unsupported Node Type
+
+**Error:**
+```
+FAIL  Unsupported Node Types  Unsupported node types found: extract (document_extraction)
+```
+
+**Fix:** Replace the unsupported node type with a supported alternative, or remove the node.
+
+Currently unsupported types:
+- `document_extraction` — legacy node type not supported for CLI execution
+
 ## Examples
 
 ### Example 1: Valid Workflow
@@ -169,7 +197,7 @@ entry: input
 exit: output
 ```
 
-**Result:** All 9 checks pass ✓
+**Result:** All 10 checks pass ✓
 
 ### Example 2: Workflow with Cycle
 
@@ -228,7 +256,7 @@ entry: a
 exit: c
 ```
 
-**Result:** All 9 checks pass ✓ (recursive edges are excluded from cycle detection)
+**Result:** All 10 checks pass ✓ (recursive edges are excluded from cycle detection)
 
 ## Integration with CI/CD
 

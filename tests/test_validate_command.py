@@ -16,11 +16,11 @@ class TestValidationRunner:
     Scenario: Validation runner orchestrates all checks
     Given a workflow YAML string or file path
     When run_all_validations is called
-    Then all 9 checks are executed and results returned
+    Then all 10 checks are executed and results returned
     """
 
     def test_valid_workflow_passes_all_checks(self, tmp_path: Path):
-        """Valid workflow passes all 9 validation checks."""
+        """Valid workflow passes all 10 validation checks."""
         wf_yaml = """
 name: Valid Workflow
 description: All checks pass
@@ -378,7 +378,7 @@ exit: exit
         assert 'not found' in result.stdout.lower() or 'error' in result.stdout.lower()
 
     def test_output_includes_all_checks(self, cli_invoke, tmp_path: Path):
-        """Output includes all 9 validation checks."""
+        """Output includes all 10 validation checks."""
         wf_file = tmp_path / 'test.workflow.yaml'
         wf_file.write_text("""
 name: Test

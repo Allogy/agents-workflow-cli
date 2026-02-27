@@ -11,7 +11,7 @@ Tech stack: Python 3.13, Typer, Rich, httpx.
 ```bash
 uv sync --all-groups                          # Install all dependencies
 uv run workflow --help                        # CLI usage
-uv run workflow validate <file.yaml>          # Offline validation (9 checks)
+uv run workflow validate <file.yaml>          # Offline validation (10 checks)
 uv run workflow push <file.yaml>              # Deploy with lockfile
 uv run workflow pull <uuid-or-name>           # Export to YAML
 uv run workflow init                          # Scaffold from templates
@@ -33,7 +33,7 @@ make codeartifact-publish-models              # Publish shared models
 
 For deep-dives, read the referenced docs:
 - `docs/init-command.md` — scaffold workflows from 7 templates
-- `docs/validate-command.md` — 9 offline validation checks
+- `docs/validate-command.md` — 10 offline validation checks
 - `docs/push-command.md` — deploy with lockfile and dependency resolution
 - `docs/pull-command.md` — export workflows to YAML
 - `docs/run-command.md` — execute workflows via Temporal
@@ -53,7 +53,7 @@ src/cli/
   last_run.py           # .workflow.last_run context file I/O
   sse.py               # SSE event parsing for streaming mode
   commands/             # One module per CLI command (init, validate, push, pull, list, delete, run)
-  validation/           # Validation runner (9 offline checks)
+  validation/           # Validation runner (10 offline checks)
   templates/            # Scaffold templates for `workflow init`
 
 shared-models/src/workflow_models/
