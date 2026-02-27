@@ -29,6 +29,7 @@ from cli.commands.run import (
     format_sse_event,
     format_sse_verbose,
     format_unknown_event,
+    parse_file_input,
     parse_input_arg,
     resolve_workflow_id,
     run_command,
@@ -75,6 +76,50 @@ class TestParseInputArg:
         """JSON array raises ValueError (only objects accepted)."""
         with pytest.raises(ValueError, match='expected an object'):
             parse_input_arg('[1, 2, 3]')
+
+
+# ---------------------------------------------------------------------------
+# File input parsing tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseFileInput:
+    """Tests for file:// prefix parsing in --input."""
+
+    def test_single_file(self, tmp_path: Path) -> None:
+        """Single file:// path returns one-element list."""
+        f = tmp_path / 'report.pdf'
+        f.write_bytes(b'fake pdf')
+        result = parse_file_input(f'file://{f}')
+        assert result == [f]
+
+    def test_multiple_files(self, tmp_path: Path) -> None:
+        """Comma-separated file:// paths return multiple paths."""
+        f1 = tmp_path / 'a.pdf'
+        f1.write_bytes(b'pdf')
+        f2 = tmp_path / 'b.docx'
+        f2.write_bytes(b'docx')
+        result = parse_file_input(f'file://{f1},file://{f2}')
+        assert result == [f1, f2]
+
+    def test_nonexistent_raises(self) -> None:
+        """Non-existent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            parse_file_input('file:///nonexistent/file.pdf')
+
+    def test_not_a_file_raises(self, tmp_path: Path) -> None:
+        """Directory path raises ValueError."""
+        d = tmp_path / 'subdir'
+        d.mkdir()
+        with pytest.raises(ValueError, match='Not a file'):
+            parse_file_input(f'file://{d}')
+
+    def test_without_prefix_still_works(self, tmp_path: Path) -> None:
+        """Path without file:// prefix is also accepted."""
+        f = tmp_path / 'data.csv'
+        f.write_bytes(b'a,b')
+        result = parse_file_input(str(f))
+        assert result == [f]
 
 
 # ---------------------------------------------------------------------------
@@ -2155,5 +2200,228 @@ class TestRunInteractiveLoop:
             patch('cli.commands.run.time.sleep'),
         ):
             result = _run_interactive(mock_client, 'wf-id', 'run-id', initial)
+
+        assert result.final_event == 'WAITING_FOR_INPUT'
+
+    # ------------------------------------------------------------------
+    # File upload branch tests
+    # ------------------------------------------------------------------
+
+    def test_file_upload_node_uses_file_prompt(self, tmp_path: Path) -> None:
+        """FILE_UPLOAD step_type triggers prompt_for_file_upload instead of prompt_for_input."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='upload-1',
+            state={'waiting_input_node_id': 'upload-1'},
+        )
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+
+        # Create a temporary file for upload
+        test_file = tmp_path / 'doc.pdf'
+        test_file.write_bytes(b'%PDF-fake')
+
+        mock_client.upload_file.return_value = MagicMock(
+            file_id='file-abc',
+            filename='doc.pdf',
+            s3_uri='s3://bucket/doc.pdf',
+            file_size=9,
+            content_type='application/pdf',
+        )
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_file_upload',
+                return_value=[test_file],
+            ),
+            patch('cli.interactive.prompt_for_input') as mock_text_prompt,
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                return_value='COMPLETED',
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'upload-1': ('my-upload-node', 'FILE_UPLOAD')},
+            )
+
+        assert result.final_event == 'COMPLETED'
+        # prompt_for_file_upload was used, not prompt_for_input
+        mock_text_prompt.assert_not_called()
+        mock_client.upload_file.assert_called_once()
+        mock_client.submit_input.assert_called_once()
+
+    def test_file_upload_submits_correct_payload(self, tmp_path: Path) -> None:
+        """Verify the input_data has {'files': [...], 'type': 'fileUpload'} format."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='upload-1',
+            state={'waiting_input_node_id': 'upload-1'},
+        )
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+
+        file_a = tmp_path / 'a.pdf'
+        file_a.write_bytes(b'pdf-a')
+        file_b = tmp_path / 'b.docx'
+        file_b.write_bytes(b'docx-b')
+
+        # Two files -> two upload responses
+        mock_client.upload_file.side_effect = [
+            MagicMock(
+                file_id='id-a',
+                filename='a.pdf',
+                s3_uri='s3://bucket/a.pdf',
+                file_size=5,
+                content_type='application/pdf',
+            ),
+            MagicMock(
+                file_id='id-b',
+                filename='b.docx',
+                s3_uri='s3://bucket/b.docx',
+                file_size=6,
+                content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ),
+        ]
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_file_upload',
+                return_value=[file_a, file_b],
+            ),
+            patch(
+                'cli.commands.run._poll_until_next_event',
+                return_value='COMPLETED',
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'upload-1': ('my-upload-node', 'FILE_UPLOAD')},
+            )
+
+        assert result.final_event == 'COMPLETED'
+        assert mock_client.upload_file.call_count == 2
+
+        # Verify submit_input was called with the correct payload
+        submit_call = mock_client.submit_input.call_args
+        input_data = submit_call.kwargs.get('input_data') or submit_call[1].get('input_data')
+        assert input_data['type'] == 'fileUpload'
+        assert len(input_data['files']) == 2
+        assert input_data['files'][0]['file_id'] == 'id-a'
+        assert input_data['files'][0]['name'] == 'a.pdf'
+        assert input_data['files'][0]['s3_uri'] == 's3://bucket/a.pdf'
+        assert input_data['files'][1]['file_id'] == 'id-b'
+        assert input_data['files'][1]['name'] == 'b.docx'
+
+    def test_file_upload_cancelled_returns_result(self) -> None:
+        """prompt_for_file_upload returns None -> function returns early."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='upload-1',
+            state={'waiting_input_node_id': 'upload-1'},
+        )
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch('cli.interactive.prompt_for_file_upload', return_value=None),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'upload-1': ('my-upload-node', 'FILE_UPLOAD')},
+            )
+
+        assert result.final_event == 'WAITING_FOR_INPUT'
+        mock_client.upload_file.assert_not_called()
+        mock_client.submit_input.assert_not_called()
+
+    def test_file_upload_upload_failure_returns_result(self, tmp_path: Path) -> None:
+        """Upload failure on one file returns the current result early."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='upload-1',
+            state={'waiting_input_node_id': 'upload-1'},
+        )
+
+        test_file = tmp_path / 'doc.pdf'
+        test_file.write_bytes(b'%PDF-fake')
+
+        mock_client.upload_file.side_effect = Exception('Upload failed: 500')
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_file_upload',
+                return_value=[test_file],
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'upload-1': ('my-upload-node', 'FILE_UPLOAD')},
+            )
+
+        assert result.final_event == 'WAITING_FOR_INPUT'
+        mock_client.submit_input.assert_not_called()
+
+    def test_file_upload_submit_failure_returns_result(self, tmp_path: Path) -> None:
+        """Submit failure after successful upload returns the current result."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='upload-1',
+            state={'waiting_input_node_id': 'upload-1'},
+        )
+
+        test_file = tmp_path / 'doc.pdf'
+        test_file.write_bytes(b'%PDF-fake')
+
+        mock_client.upload_file.return_value = MagicMock(
+            file_id='file-abc',
+            filename='doc.pdf',
+            s3_uri='s3://bucket/doc.pdf',
+            file_size=9,
+            content_type='application/pdf',
+        )
+        mock_client.submit_input.side_effect = Exception('Submit failed: 500')
+
+        initial = StreamResult(final_event='WAITING_FOR_INPUT', nodes=[])
+
+        with (
+            patch(
+                'cli.interactive.prompt_for_file_upload',
+                return_value=[test_file],
+            ),
+            patch('cli.commands.run.time.sleep'),
+        ):
+            result = _run_interactive(
+                mock_client,
+                'wf-id',
+                'run-id',
+                initial,
+                node_map={'upload-1': ('my-upload-node', 'FILE_UPLOAD')},
+            )
 
         assert result.final_event == 'WAITING_FOR_INPUT'

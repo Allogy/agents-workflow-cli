@@ -17,6 +17,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from cli.client import (
+    FileUploadResponse,
     SaveCompleteWorkflowResponse,
     SubmitInputResponse,
     SubmitReviewResponse,
@@ -809,3 +810,90 @@ class TestV2TemporalApiKeyAuth:
         assert '/v2/workflows/' in str(request.url)
         assert '/status' in str(request.url)
         assert request.headers['x-api-key'] == API_KEY
+
+
+# ============================================================================
+# File Upload
+# ============================================================================
+
+
+class TestFileUpload:
+    """Tests for the upload_file method (multipart file upload)."""
+
+    UPLOAD_RESPONSE = {
+        'file_id': 'file-abc-123',
+        'filename': 'report.pdf',
+        's3_uri': 's3://bucket/uploads/report.pdf',
+        'file_size': 1024,
+        'content_type': 'application/pdf',
+        'workflow_id': WORKFLOW_ID,
+        'node_id': NODE_ID,
+        'run_id': RUN_ID,
+    }
+
+    def test_upload_file_returns_response(
+        self, client: WorkflowClient, httpx_mock: HTTPXMock, tmp_path
+    ):
+        """upload_file succeeds and returns a FileUploadResponse."""
+        # Create a temporary file to upload
+        test_file = tmp_path / 'report.pdf'
+        test_file.write_bytes(b'%PDF-1.4 fake pdf content')
+
+        httpx_mock.add_response(
+            url=f'{BASE_URL}/v2/workflows/{WORKFLOW_ID}/nodes/{NODE_ID}/upload',
+            json=self.UPLOAD_RESPONSE,
+        )
+        result = client.upload_file(
+            workflow_id=WORKFLOW_ID,
+            node_id=NODE_ID,
+            run_id=RUN_ID,
+            file_path=test_file,
+        )
+
+        assert isinstance(result, FileUploadResponse)
+        assert result.file_id == 'file-abc-123'
+        assert result.filename == 'report.pdf'
+        assert result.s3_uri == 's3://bucket/uploads/report.pdf'
+        assert result.file_size == 1024
+        assert result.content_type == 'application/pdf'
+
+    def test_upload_file_sends_multipart(
+        self, client: WorkflowClient, httpx_mock: HTTPXMock, tmp_path
+    ):
+        """upload_file sends multipart form data with run_id and file."""
+        test_file = tmp_path / 'data.csv'
+        test_file.write_text('col1,col2\na,b\n')
+
+        httpx_mock.add_response(
+            url=f'{BASE_URL}/v2/workflows/{WORKFLOW_ID}/nodes/{NODE_ID}/upload',
+            json=self.UPLOAD_RESPONSE,
+        )
+        client.upload_file(
+            workflow_id=WORKFLOW_ID,
+            node_id=NODE_ID,
+            run_id=RUN_ID,
+            file_path=test_file,
+        )
+
+        request = httpx_mock.get_requests()[0]
+        assert request.method == 'POST'
+        # Multipart requests have a content-type header starting with multipart/form-data
+        assert 'multipart/form-data' in request.headers['content-type']
+        # The body should contain the run_id and the file content
+        body_bytes = request.content
+        assert b'run_id' in body_bytes
+        assert RUN_ID.encode() in body_bytes
+        assert b'data.csv' in body_bytes
+
+    def test_upload_file_nonexistent_raises(self, client: WorkflowClient):
+        """upload_file raises FileNotFoundError for a nonexistent file."""
+        from pathlib import Path
+
+        fake_path = Path('/tmp/nonexistent-file-that-does-not-exist.pdf')
+        with pytest.raises(FileNotFoundError):
+            client.upload_file(
+                workflow_id=WORKFLOW_ID,
+                node_id=NODE_ID,
+                run_id=RUN_ID,
+                file_path=fake_path,
+            )

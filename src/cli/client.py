@@ -20,8 +20,10 @@ Usage::
 
 from __future__ import annotations
 
+import mimetypes
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -83,6 +85,30 @@ class SubmitReviewResponse(BaseModel):
     workflow_id: str
     status: str
     message: str
+
+
+class FileUploadResponse(BaseModel):
+    """Response from POST /v2/workflows/{id}/nodes/{node_id}/upload."""
+
+    file_id: str
+    filename: str
+    s3_uri: str
+    file_size: int
+    content_type: str
+    workflow_id: str | None = None
+    node_id: str | None = None
+    run_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def _guess_content_type(file_path: Path) -> str:
+    """Guess MIME type from file extension, defaulting to application/octet-stream."""
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    return mime_type or 'application/octet-stream'
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +566,44 @@ class WorkflowClient:
             params={'run_id': run_id},
         )
         return SubmitInputResponse.model_validate(response.json())
+
+    def upload_file(
+        self,
+        workflow_id: str | UUID,
+        *,
+        node_id: str,
+        run_id: str,
+        file_path: Path,
+    ) -> FileUploadResponse:
+        """Upload a local file to a FILE_UPLOAD node.
+
+        Sends a multipart/form-data POST with the file binary and run ID.
+
+        Args:
+            workflow_id: UUID of the workflow.
+            node_id: ID of the FILE_UPLOAD node.
+            run_id: The run identifier.
+            file_path: Path to the local file to upload.
+
+        Returns:
+            Upload confirmation with file metadata (file_id, s3_uri, etc.).
+
+        Raises:
+            FileNotFoundError: If *file_path* does not exist.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f'File not found: {file_path}')
+
+        content_type = _guess_content_type(file_path)
+        with open(file_path, 'rb') as fh:
+            response = self._client.post(
+                f'/v2/workflows/{workflow_id}/nodes/{node_id}/upload',
+                data={'run_id': run_id},
+                files={'file': (file_path.name, fh, content_type)},
+            )
+        raise_for_status(response)
+        return FileUploadResponse.model_validate(response.json())
 
     def submit_review(
         self,

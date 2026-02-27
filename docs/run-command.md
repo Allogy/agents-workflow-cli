@@ -86,6 +86,42 @@ the command prints a hint and exits with code 0:
    Use: workflow input <run-id> --data '{...}'
 ```
 
+## File Upload
+
+When a workflow contains `file_upload` nodes, the CLI handles file uploads
+during interactive execution.
+
+### Interactive Mode
+
+In `--stream --interactive` mode, the CLI prompts for file paths when the
+workflow reaches a `file_upload` node:
+
+```
+$ workflow run <id> --stream --interactive
+...
+File upload required
+Node: upload-doc (FILE_UPLOAD)
+Accepted formats: pdf, docx
+Max file size: 10.0 MB
+File path: /path/to/report.pdf
+Added: report.pdf
+Add another file? [y/N]: n
+Uploading report.pdf... done
+Files submitted.
+```
+
+### Non-Interactive Mode
+
+Provide file paths via the `--input` flag using `file://` prefix:
+
+```bash
+# Single file
+workflow run <id> --stream --input 'upload_node=file:///path/to/report.pdf'
+
+# Multiple files
+workflow run <id> --stream --input 'upload_node=file:///path/to/file1.pdf,file:///path/to/file2.docx'
+```
+
 ## `.workflow.last_run` Context File
 
 After starting a workflow, a `.workflow.last_run` file is written to the current
