@@ -1,4 +1,4 @@
-"""Validation runner that orchestrates all 9 workflow validation checks.
+"""Validation runner that orchestrates all 10 workflow validation checks.
 
 Runs checks in sequence:
 1. YAML syntax parsing
@@ -8,6 +8,7 @@ Runs checks in sequence:
 7. Cycle detection
 8. Variable reference validation
 9. Node config validation (part of #2)
+10. Unsupported node types (document_extraction, etc.)
 
 Returns structured CheckResult objects with PASS/FAIL/WARN status.
 
@@ -28,6 +29,9 @@ from workflow_models.wdf.validation import (
 )
 
 from cli.wdf_yaml import load_workflow_yaml
+
+# Node types that pass schema validation but are not supported for push/run.
+UNSUPPORTED_NODE_TYPES: frozenset[str] = frozenset({'document_extraction'})
 
 
 class CheckStatus(str, Enum):
@@ -56,7 +60,7 @@ class CheckResult:
 
 
 def run_all_validations(yaml_str: str) -> list[CheckResult]:
-    """Run all 9 validation checks on a workflow YAML string.
+    """Run all 10 validation checks on a workflow YAML string.
 
     Args:
         yaml_str: Raw YAML content of a .workflow.yaml file.
@@ -151,6 +155,23 @@ def run_all_validations(yaml_str: str) -> list[CheckResult]:
                 details=var_ref_result.details,
             )
         )
+
+    # Check 10: Unsupported node types
+    unsupported_found: list[str] = []
+    for slug, node in workflow.nodes.items():
+        if node.type in UNSUPPORTED_NODE_TYPES:
+            unsupported_found.append(f'{slug} ({node.type})')
+    if unsupported_found:
+        results.append(
+            CheckResult(
+                check_name='Unsupported Node Types',
+                status=CheckStatus.FAIL,
+                message=f'Unsupported node types found: {", ".join(unsupported_found)}',
+                details={'unsupported_nodes': unsupported_found},
+            )
+        )
+    else:
+        results.append(CheckResult(check_name='Unsupported Node Types', status=CheckStatus.PASS))
 
     # Additional synthetic checks for clearer reporting
     # (These are actually covered by WDF Schema Conformance, but we list them separately)

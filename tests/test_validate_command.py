@@ -48,7 +48,7 @@ entry: input
 exit: output
 """
         results = run_all_validations(wf_yaml)
-        assert len(results) == 9
+        assert len(results) == 10
         assert all(r.status in {CheckStatus.PASS, CheckStatus.WARN} for r in results)
 
         # Check specific checks
@@ -212,6 +212,79 @@ exit: bad
         schema_check = next(r for r in results if r.check_name == 'WDF Schema Conformance')
         assert schema_check.status == CheckStatus.FAIL
         assert 'template' in schema_check.message.lower()
+
+
+class TestUnsupportedNodeValidation:
+    """
+    Scenario: Unsupported node types are flagged during validation
+    Given a workflow with nodes of unsupported types (e.g. document_extraction)
+    When run_all_validations is called
+    Then the 'Unsupported Node Types' check returns FAIL with details
+    """
+
+    def test_document_extraction_node_fails_validation(self):
+        """Workflow with document_extraction node fails unsupported check."""
+        wf_yaml = """
+name: Doc Extract Workflow
+description: Contains unsupported document_extraction node
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config: {}
+  extract:
+    type: document_extraction
+    execution_mode: FLOW
+    config: {}
+  output:
+    type: structured_output
+    execution_mode: OUTPUT
+    config: {}
+edges:
+  - from: input
+    to: extract
+  - from: extract
+    to: output
+entry: input
+exit: output
+"""
+        results = run_all_validations(wf_yaml)
+        unsupported_check = next(r for r in results if r.check_name == 'Unsupported Node Types')
+        assert unsupported_check.status == CheckStatus.FAIL
+        assert 'extract' in unsupported_check.message
+        assert 'document_extraction' in unsupported_check.message
+
+    def test_valid_workflow_passes_unsupported_check(self):
+        """Workflow without unsupported nodes passes the unsupported check."""
+        wf_yaml = """
+name: Valid Workflow
+description: No unsupported nodes
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config: {}
+  process:
+    type: llm_call
+    execution_mode: MESSAGES
+    config:
+      model: test-model
+      template: "Process: {{input.output.text}}"
+  output:
+    type: structured_output
+    execution_mode: OUTPUT
+    config: {}
+edges:
+  - from: input
+    to: process
+  - from: process
+    to: output
+entry: input
+exit: output
+"""
+        results = run_all_validations(wf_yaml)
+        unsupported_check = next(r for r in results if r.check_name == 'Unsupported Node Types')
+        assert unsupported_check.status == CheckStatus.PASS
 
 
 class TestValidateCommand:
