@@ -29,6 +29,7 @@ import sys
 import time
 import uuid as uuid_mod
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -346,12 +347,57 @@ _SSE_COLOR_MAP: dict[str, str] = {
     'RUN_ERROR': 'red',
 }
 
+_KNOWN_EVENT_TYPES = set(_SSE_COLOR_MAP.keys())
+
+
+@dataclass
+class NodeResult:
+    """Outcome of a single node during streaming."""
+
+    node_id: str
+    display_name: str
+    step_type: str
+    status: str  # 'started', 'finished', 'error'
+    duration_ms: int | None = None
+
+
+@dataclass
+class StreamResult:
+    """Complete result of a streaming run."""
+
+    final_event: str
+    nodes: list[NodeResult] = field(default_factory=list)
+
+
+def _get_display_name(event: SSEEvent) -> str:
+    """Get human-readable node display name, preferring slug over UUID."""
+    return (
+        event.data.get('node_slug') or event.data.get('step_name') or event.data.get('node_id', '')
+    )
+
+
+def _format_duration_ms(ms: int) -> str:
+    """Format milliseconds into a human-friendly duration string."""
+    if ms < 1000:
+        return f'{ms}ms'
+    return _format_duration(ms // 1000)
+
+
+def format_unknown_event(event: SSEEvent, *, max_chars: int = 100) -> str:
+    """Format an unknown SSE event as dim text with truncated payload."""
+    ts = datetime.now().strftime('%H:%M:%S')
+    raw = json.dumps(event.data, default=str)
+    if len(raw) > max_chars:
+        raw = raw[:max_chars] + '...'
+    return f'[dim][{ts}] {event.event_type}: {raw}[/dim]'
+
 
 def format_sse_compact(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) -> str:
     """Format an SSE event in compact one-line format with timestamp.
 
-    Format: [HH:MM:SS] EVENT_TYPE node-name
-    Color-coded by event type category.
+    Format: [HH:MM:SS] EVENT_TYPE node-name (details)
+    Color-coded by event type category. Shows step_type on STEP_STARTED,
+    duration on STEP_FINISHED, and structured errors on error events.
 
     Args:
         event: Parsed SSE event.
@@ -363,15 +409,28 @@ def format_sse_compact(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) 
     """
     ts = datetime.now().strftime('%H:%M:%S')
     t = event.event_type
-    node_id = event.data.get('node_id', '')
+    display_name = _get_display_name(event)
     color = _SSE_COLOR_MAP.get(t, 'dim')
-    suffix = f' {node_id}' if node_id else ''
+    suffix = f' {display_name}' if display_name else ''
 
-    # Add error detail for error events
-    if t in ('STEP_ERROR', 'RUN_ERROR'):
+    if t == 'STEP_STARTED':
+        step_type = event.data.get('step_type', '')
+        if step_type:
+            suffix += f' ({step_type})'
+    elif t == 'STEP_FINISHED':
+        duration_ms = event.data.get('duration_ms')
+        if duration_ms is not None:
+            suffix += f' [dim]{_format_duration_ms(duration_ms)}[/dim]'
+    elif t in ('STEP_ERROR', 'RUN_ERROR'):
         error = event.data.get('error', '')
         if error:
             suffix += f': {error}'
+        error_type = event.data.get('error_type', '')
+        if error_type:
+            suffix += f' [dim]({error_type})[/dim]'
+        code = event.data.get('code', '')
+        if code:
+            suffix += f' [dim][{code}][/dim]'
 
     return f'[dim][{ts}][/dim] [{color}]{t}[/{color}]{suffix}'
 
@@ -380,6 +439,8 @@ def format_sse_verbose(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) 
     """Format an SSE event in verbose multi-line format with payload excerpts.
 
     Shows timestamp, event type, node info, and a payload excerpt.
+    Error events are expanded to multi-line with error, error_type, and code.
+    Unknown events show the full raw payload.
 
     Args:
         event: Parsed SSE event.
@@ -391,30 +452,51 @@ def format_sse_verbose(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) 
     """
     ts = datetime.now().strftime('%H:%M:%S')
     t = event.event_type
-    node_id = event.data.get('node_id', '')
+    display_name = _get_display_name(event)
     color = _SSE_COLOR_MAP.get(t, 'dim')
 
     lines = [f'[dim][{ts}][/dim] [{color}]{t}[/{color}]']
-    if node_id:
-        lines[0] += f'  {node_id}'
+    if display_name:
+        lines[0] += f'  {display_name}'
 
     # Add step type info
     step_type = event.data.get('step_type', '')
     if step_type:
         lines.append(f'  [dim]Type:[/dim] {step_type}')
 
-    # Add payload excerpt (exclude type and node_id which are already shown)
-    payload_keys = {
-        k: v for k, v in event.data.items() if k not in ('type', 'node_id', 'step_type')
-    }
-    if payload_keys:
-        excerpt = _json.dumps(payload_keys, indent=2, default=str)
-        # Truncate long payloads
-        max_lines = 6
-        excerpt_lines = excerpt.split('\n')
-        if len(excerpt_lines) > max_lines:
-            excerpt = '\n'.join(excerpt_lines[:max_lines]) + '\n  ...'
-        lines.append(f'  [dim]Payload:[/dim]\n  {excerpt}')
+    # Error events: multi-line expansion
+    if t in ('STEP_ERROR', 'RUN_ERROR'):
+        error = event.data.get('error', '')
+        if error:
+            lines.append(f'  Error: {error}')
+        error_type = event.data.get('error_type', '')
+        if error_type:
+            lines.append(f'  Type: {error_type}')
+        code = event.data.get('code', '')
+        if code:
+            lines.append(f'  Code: {code}')
+        traceback = event.data.get('traceback', '')
+        if traceback:
+            lines.append(f'  Traceback: {traceback}')
+    elif t not in _KNOWN_EVENT_TYPES:
+        # Unknown events: show full raw payload
+        raw = _json.dumps(event.data, indent=2, default=str)
+        lines.append(f'  [dim]Payload:[/dim]\n  {raw}')
+    else:
+        # Known non-error events: payload excerpt
+        payload_keys = {
+            k: v
+            for k, v in event.data.items()
+            if k not in ('type', 'node_id', 'node_slug', 'step_name', 'step_type')
+        }
+        if payload_keys:
+            excerpt = _json.dumps(payload_keys, indent=2, default=str)
+            # Truncate long payloads
+            max_lines = 6
+            excerpt_lines = excerpt.split('\n')
+            if len(excerpt_lines) > max_lines:
+                excerpt = '\n'.join(excerpt_lines[:max_lines]) + '\n  ...'
+            lines.append(f'  [dim]Payload:[/dim]\n  {excerpt}')
 
     return '\n'.join(lines)
 
