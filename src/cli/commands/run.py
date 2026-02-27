@@ -787,7 +787,7 @@ def _run_interactive(
     Returns:
         StreamResult with final event and accumulated node results.
     """
-    from cli.interactive import prompt_for_input, prompt_for_review
+    from cli.interactive import prompt_for_file_upload, prompt_for_input, prompt_for_review
 
     out = output_console or get_console()
     result = initial_result
@@ -813,28 +813,80 @@ def _run_interactive(
             node_id = status_resp.state.get('waiting_input_node_id', '')
             node_slug, step_type = node_id_to_info.get(node_id, (node_id, ''))
 
-            data = prompt_for_input(node_id, node_slug, step_type, console=out)
-            if data is None:
-                # User cancelled -- exit interactive loop
-                return result
-
-            # Submit with retry
-            try:
-                client.submit_input(workflow_id, run_id=run_id, node_id=node_id, input_data=data)
-                out.print('[green]Input submitted.[/green]')
-            except Exception as e:
-                out.print(f'[bold red]Error submitting input:[/bold red] {e}')
-                if Confirm.ask('Retry submission?', default=True):
-                    try:
-                        client.submit_input(
-                            workflow_id, run_id=run_id, node_id=node_id, input_data=data
-                        )
-                        out.print('[green]Input submitted.[/green]')
-                    except Exception as retry_err:
-                        out.print(f'[bold red]Retry failed:[/bold red] {retry_err}')
-                        return result
-                else:
+            if step_type == 'FILE_UPLOAD':
+                # File upload flow
+                file_paths = prompt_for_file_upload(node_id, node_slug, step_type, console=out)
+                if file_paths is None:
                     return result
+
+                file_refs: list[dict[str, Any]] = []
+                for fp in file_paths:
+                    try:
+                        out.print(f'[dim]Uploading {fp.name}...[/dim]', end=' ')
+                        upload_resp = client.upload_file(
+                            workflow_id,
+                            node_id=node_id,
+                            run_id=run_id,
+                            file_path=fp,
+                        )
+                        file_refs.append(
+                            {
+                                'file_id': upload_resp.file_id,
+                                'name': upload_resp.filename,
+                                's3_uri': upload_resp.s3_uri,
+                                'size': upload_resp.file_size,
+                                'content_type': upload_resp.content_type,
+                            }
+                        )
+                        out.print('[green]done[/green]')
+                    except Exception as e:
+                        out.print(f'[bold red]failed: {e}[/bold red]')
+                        return result
+
+                input_data: dict[str, Any] = {'files': file_refs, 'type': 'fileUpload'}
+                try:
+                    client.submit_input(
+                        workflow_id,
+                        run_id=run_id,
+                        node_id=node_id,
+                        input_data=input_data,
+                    )
+                    out.print('[green]Files submitted.[/green]')
+                except Exception as e:
+                    out.print(f'[bold red]Error submitting files:[/bold red] {e}')
+                    return result
+            else:
+                # Existing text/JSON input flow
+                data = prompt_for_input(node_id, node_slug, step_type, console=out)
+                if data is None:
+                    # User cancelled -- exit interactive loop
+                    return result
+
+                # Submit with retry
+                try:
+                    client.submit_input(
+                        workflow_id,
+                        run_id=run_id,
+                        node_id=node_id,
+                        input_data=data,
+                    )
+                    out.print('[green]Input submitted.[/green]')
+                except Exception as e:
+                    out.print(f'[bold red]Error submitting input:[/bold red] {e}')
+                    if Confirm.ask('Retry submission?', default=True):
+                        try:
+                            client.submit_input(
+                                workflow_id,
+                                run_id=run_id,
+                                node_id=node_id,
+                                input_data=data,
+                            )
+                            out.print('[green]Input submitted.[/green]')
+                        except Exception as retry_err:
+                            out.print(f'[bold red]Retry failed:[/bold red] {retry_err}')
+                            return result
+                    else:
+                        return result
 
         elif event_upper == 'WAITING_FOR_REVIEW':
             # Get the paused node info from status API
