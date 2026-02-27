@@ -221,6 +221,7 @@ def list_command(config: CLIConfig, output_format: str | None = None) -> None:
     Args:
         config: CLI configuration with API credentials.
         output_format: Output format ('json', 'yaml', or None for table).
+            Falls back to config.output_format when None.
 
     Raises:
         Exception: If API call fails or configuration is invalid.
@@ -228,10 +229,13 @@ def list_command(config: CLIConfig, output_format: str | None = None) -> None:
     # Validate config has required fields
     config.validate_for_api()
 
+    # Fall back to global --format flag from config when command-level flag is absent
+    fmt = output_format or (config.output_format.value if config.output_format else None)
+
     # Route to appropriate formatter
-    if output_format == 'json':
+    if fmt == 'json':
         list_workflows_json(config)
-    elif output_format == 'yaml':
+    elif fmt == 'yaml':
         list_workflows_yaml(config)
     else:
         list_workflows_table(config)

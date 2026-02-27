@@ -118,11 +118,11 @@ def run_all_validations(yaml_str: str) -> list[CheckResult]:
     if reachability_result.passed:
         results.append(CheckResult(check_name='Graph Reachability', status=CheckStatus.PASS))
     else:
-        # Unreachable nodes are a WARNING (not blocking per ticket)
+        # Unreachable nodes are a blocking error (must match server-side validation)
         results.append(
             CheckResult(
                 check_name='Graph Reachability',
-                status=CheckStatus.WARN,
+                status=CheckStatus.FAIL,
                 message=reachability_result.message,
                 details=reachability_result.details,
             )

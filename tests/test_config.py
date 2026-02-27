@@ -54,7 +54,7 @@ class TestCLIConfig:
 
     def test_default_output_format(self):
         config = CLIConfig(host='https://api.example.com', api_key='key', org_id='org-123')
-        assert config.output_format == OutputFormat.JSON
+        assert config.output_format is None
 
     def test_optional_fields_default_to_none(self):
         config = CLIConfig()

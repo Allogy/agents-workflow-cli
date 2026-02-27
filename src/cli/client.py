@@ -517,6 +517,8 @@ class WorkflowClient:
             headers={'Accept': 'text/event-stream'},
             timeout=None,
         ) as response:
+            if not response.is_success:
+                response.read()
             raise_for_status(response)
             yield response
 

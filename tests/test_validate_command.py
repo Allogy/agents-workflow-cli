@@ -118,8 +118,8 @@ exit: b
         assert cycle_check.status == CheckStatus.FAIL
         assert 'cycle' in cycle_check.message.lower()
 
-    def test_unreachable_nodes_warning(self):
-        """Unreachable nodes generate a warning."""
+    def test_unreachable_nodes_fail(self):
+        """Unreachable nodes generate a failure (matches server-side validation)."""
         unreachable_wf = """
 name: Unreachable Node
 nodes:
@@ -145,7 +145,7 @@ exit: exit
 """
         results = run_all_validations(unreachable_wf)
         reachability_check = next(r for r in results if r.check_name == 'Graph Reachability')
-        assert reachability_check.status == CheckStatus.WARN
+        assert reachability_check.status == CheckStatus.FAIL
         assert 'orphan' in reachability_check.message.lower()
 
     def test_invalid_variable_reference_fails(self):
@@ -341,11 +341,11 @@ exit: b
         assert result.exit_code == 1
         assert 'FAIL' in result.stdout or 'fail' in result.stdout.lower()
 
-    def test_warnings_only_exits_0(self, cli_invoke, tmp_path: Path):
-        """Warnings without failures exit with code 0."""
-        wf_file = tmp_path / 'warnings.workflow.yaml'
+    def test_unreachable_nodes_exits_1(self, cli_invoke, tmp_path: Path):
+        """Unreachable nodes cause validation failure (exit code 1)."""
+        wf_file = tmp_path / 'unreachable.workflow.yaml'
         wf_file.write_text("""
-name: Warnings
+name: Unreachable
 nodes:
   entry:
     type: plain_txt_input
@@ -368,8 +368,8 @@ entry: entry
 exit: exit
 """)
         result = cli_invoke('validate', str(wf_file))
-        assert result.exit_code == 0
-        assert 'WARN' in result.stdout or 'warn' in result.stdout.lower()
+        assert result.exit_code == 1
+        assert 'FAIL' in result.stdout or 'fail' in result.stdout.lower()
 
     def test_file_not_found_exits_1(self, cli_invoke):
         """Non-existent file exits with code 1."""

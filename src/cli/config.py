@@ -56,7 +56,7 @@ class CLIConfig:
     host: str | None = None
     api_key: str | None = None
     org_id: str | None = None
-    output_format: OutputFormat = field(default=OutputFormat.JSON)
+    output_format: OutputFormat | None = None
 
     def validate_for_api(self) -> None:
         """Raise ConfigError if any required API credential is missing."""
@@ -122,13 +122,13 @@ def load_config(config_path: Path | None = None) -> CLIConfig:
     if env_org_id is not None:
         org_id = env_org_id
 
-    # Resolve output format
-    output_format = OutputFormat.JSON
+    # Resolve output format (None means "not explicitly set")
+    output_format: OutputFormat | None = None
     if fmt and isinstance(fmt, str):
         try:
             output_format = OutputFormat(fmt.lower())
         except ValueError:
-            pass  # Keep default
+            pass  # Keep as None
 
     return CLIConfig(
         host=host if host else None,
@@ -155,7 +155,7 @@ def resolve_config(
         try:
             resolved_format = OutputFormat(output_format.lower())
         except ValueError:
-            resolved_format = base.output_format
+            pass  # Keep base value
 
     return CLIConfig(
         host=host if host is not None else base.host,
