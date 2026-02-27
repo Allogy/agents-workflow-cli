@@ -37,6 +37,7 @@ from typing import Any
 import httpx
 import yaml
 from rich.console import Console
+from rich.table import Table
 
 from cli.client import WorkflowClient
 from cli.config import CLIConfig, get_run_timeout
@@ -505,6 +506,34 @@ def format_sse_verbose(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) 
 format_sse_event = format_sse_compact
 
 
+def _print_summary_table(nodes: list[NodeResult], console: Console) -> None:
+    """Print a Rich table summarizing all node outcomes."""
+    if not nodes:
+        return
+    table = Table(title='Run Summary', show_header=True, header_style='bold')
+    table.add_column('Node', style='cyan', no_wrap=True)
+    table.add_column('Type', style='dim')
+    table.add_column('Status', justify='center')
+    table.add_column('Duration', justify='right', style='dim')
+
+    for node in nodes:
+        if node.status == 'finished':
+            status_str = '[green]OK[/green]'
+        elif node.status == 'error':
+            status_str = '[red]ERROR[/red]'
+        else:
+            status_str = f'[yellow]{node.status}[/yellow]'
+        duration_str = (
+            _format_duration_ms(node.duration_ms) if node.duration_ms is not None else '-'
+        )
+        table.add_row(
+            node.display_name or node.node_id, node.step_type or '-', status_str, duration_str
+        )
+
+    console.print()
+    console.print(table)
+
+
 def run_streaming(
     lines: Iterator[str],
     *,
@@ -512,7 +541,7 @@ def run_streaming(
     max_timeout_seconds: int | float | None = None,
     verbose: bool = False,
     output_console: Console | None = None,
-) -> str:
+) -> StreamResult:
     """Process SSE event lines until terminal or HITL event.
 
     Args:
@@ -524,7 +553,7 @@ def run_streaming(
         output_console: Console to use for output (for --no-color support).
 
     Returns:
-        Final event type string.
+        StreamResult with final event type and accumulated node results.
 
     Raises:
         SystemExit: With code 1 if timeout is reached.
@@ -535,14 +564,87 @@ def run_streaming(
     seen_nodes: list[str] = []
     fmt = format_sse_verbose if verbose else format_sse_compact
     out = output_console or get_console()
+    node_results: dict[str, NodeResult] = {}  # keyed by node_id
+    node_start_times: dict[str, float] = {}  # client-side timing fallback
 
     for line in lines:
         event = parse_sse_line(line)
         if event is None:
             continue
 
+        event_type_upper = event.event_type.upper()
         node_id = event.data.get('node_id', '')
-        if node_id and event.event_type == 'STEP_STARTED' and node_id not in seen_nodes:
+
+        # Unknown event routing
+        if (
+            event_type_upper not in _KNOWN_EVENT_TYPES
+            and event_type_upper not in _SSE_TERMINAL_EVENTS
+            and event_type_upper not in _SSE_HITL_EVENTS
+        ):
+            out.print(format_unknown_event(event))
+            last_event_type = event.event_type
+            # Check timeout even for unknown events
+            elapsed = time.monotonic() - start_time
+            if elapsed >= timeout:
+                out.print(
+                    f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                    f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+                )
+                sys.exit(1)
+            continue
+
+        # Node tracking: STEP_STARTED
+        if event_type_upper == 'STEP_STARTED' and node_id:
+            node_start_times[node_id] = time.monotonic()
+            node_results[node_id] = NodeResult(
+                node_id=node_id,
+                display_name=_get_display_name(event),
+                step_type=event.data.get('step_type', ''),
+                status='started',
+            )
+
+        # Node tracking: STEP_FINISHED
+        if event_type_upper == 'STEP_FINISHED' and node_id:
+            duration_ms = event.data.get('duration_ms')
+            if duration_ms is None and node_id in node_start_times:
+                duration_ms = int((time.monotonic() - node_start_times[node_id]) * 1000)
+            if node_id in node_results:
+                node_results[node_id].status = 'finished'
+                node_results[node_id].duration_ms = duration_ms
+                # Update display_name if STEP_FINISHED carries a better slug
+                finished_display = _get_display_name(event)
+                if finished_display:
+                    node_results[node_id].display_name = finished_display
+            else:
+                node_results[node_id] = NodeResult(
+                    node_id=node_id,
+                    display_name=_get_display_name(event),
+                    step_type=event.data.get('step_type', ''),
+                    status='finished',
+                    duration_ms=duration_ms,
+                )
+
+        # Node tracking: STEP_ERROR
+        if event_type_upper == 'STEP_ERROR' and node_id:
+            duration_ms = event.data.get('duration_ms')
+            if duration_ms is None and node_id in node_start_times:
+                duration_ms = int((time.monotonic() - node_start_times[node_id]) * 1000)
+            if node_id in node_results:
+                node_results[node_id].status = 'error'
+                node_results[node_id].duration_ms = duration_ms
+                finished_display = _get_display_name(event)
+                if finished_display:
+                    node_results[node_id].display_name = finished_display
+            else:
+                node_results[node_id] = NodeResult(
+                    node_id=node_id,
+                    display_name=_get_display_name(event),
+                    step_type=event.data.get('step_type', ''),
+                    status='error',
+                    duration_ms=duration_ms,
+                )
+
+        if node_id and event_type_upper == 'STEP_STARTED' and node_id not in seen_nodes:
             seen_nodes.append(node_id)
 
         step = len(seen_nodes)
@@ -559,10 +661,12 @@ def run_streaming(
                 )
             elif last_event_type.upper() == 'WAITING_FOR_REVIEW':
                 out.print('  [dim]Next: workflow review --approve[/dim]')
-            return last_event_type
+            return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         if last_event_type.upper() in _SSE_TERMINAL_EVENTS:
-            return last_event_type
+            if last_event_type.upper() == 'RUN_FINISHED':
+                _print_summary_table(list(node_results.values()), out)
+            return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         elapsed = time.monotonic() - start_time
         if elapsed >= timeout:
@@ -581,7 +685,7 @@ def run_streaming(
             'Use [cyan]workflow status[/cyan] to check current state.'
         )
 
-    return last_event_type
+    return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
 
 # ---------------------------------------------------------------------------
@@ -658,12 +762,13 @@ def run_command(
             with client.stream_workflow_temporal(
                 workflow_id, run_id=run_id, inputs=inputs
             ) as response:
-                final_status = run_streaming(
+                result = run_streaming(
                     response.iter_lines(),
                     total_nodes=total_nodes,
                     verbose=verbose,
                     output_console=output_console,
                 )
+                final_status = result.final_event
 
         else:
             # Start workflow (polling or no-follow)
