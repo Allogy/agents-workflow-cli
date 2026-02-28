@@ -405,3 +405,47 @@ class TestInputPreFlightPassesOnValidState:
         mock_client.submit_input.assert_called_once()
         mock_client.get_workflow_status.assert_called_once()
         mock_client.list_nodes.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# BUG-1: Fallback to current_node_id when waiting_input_node_id is missing
+# ---------------------------------------------------------------------------
+
+
+class TestInputFallbackToCurrentNodeId:
+    """BUG-1 defensive: fall back to current_node_id when waiting_input_node_id is missing."""
+
+    @patch('cli.commands.input.Confirm.ask', return_value=True)
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_fallback_current_node_id(self, mock_client_class, mock_confirm, tmp_path):
+        """Input succeeds using current_node_id when waiting_input_node_id is absent."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        # Status response WITHOUT waiting_input_node_id but WITH current_node_id
+        status_resp = WorkflowStatusResponse(
+            workflow_id=_WORKFLOW_ID,
+            run_id=_RUN_ID,
+            status='WAITING_FOR_INPUT',
+            current_node=_NODE_ID,
+            state={
+                'execution_status': 'WAITING_FOR_INPUT',
+                'current_node_id': _NODE_ID,
+                # NOTE: no waiting_input_node_id key at all
+            },
+        )
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = status_resp
+        mock_client.list_nodes.return_value = _make_nodes()
+        mock_client.submit_input.return_value = _make_submit_response()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        input_command(
+            _make_mock_config(),
+            node_id=_NODE_ID,
+            data='{"text": "hello"}',
+            working_dir=tmp_path,
+        )
+
+        mock_client.submit_input.assert_called_once()

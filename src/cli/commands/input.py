@@ -106,8 +106,14 @@ def input_command(
             )
 
         # Check the target node is actually waiting for input
-        if state.get('waiting_input_node_id') != node_id:
-            actual = state.get('waiting_input_node_id') or 'none'
+        waiting_node = state.get('waiting_input_node_id')
+        # Fallback: use current_node_id when waiting_input_node_id is missing
+        # but execution_status indicates workflow is waiting for input (BUG-1 defensive)
+        if not waiting_node and state.get('execution_status', '').upper() == 'WAITING_FOR_INPUT':
+            waiting_node = state.get('current_node_id')
+
+        if waiting_node != node_id:
+            actual = waiting_node or 'none'
             raise ValueError(
                 f'Node {node_id} is not currently waiting for input. Current input node: {actual}'
             )
