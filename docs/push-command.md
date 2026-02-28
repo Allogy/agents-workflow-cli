@@ -71,7 +71,7 @@ dependencies:
 
 - Lockfile is **automatically created** on first push
 - Lockfile is **automatically updated** on subsequent pushes
-- Lockfile is **git-ignored** by default (add to `.gitignore`)
+- Lockfile should be **committed to version control** for team collaboration
 - Lockfile enables **idempotent updates** (same command creates or updates)
 
 ## Dependency Resolution
@@ -507,14 +507,6 @@ workflow push --org org-a-uuid my-workflow.workflow.yaml
 
 # Push to org B
 workflow push --org org-b-uuid my-workflow.workflow.yaml
-```
-
-Or use config profiles:
-
-```bash
-# Use different config files
-WORKFLOW_CLI_CONFIG=~/.workflow/config-org-a.yaml workflow push my-workflow.workflow.yaml
-WORKFLOW_CLI_CONFIG=~/.workflow/config-org-b.yaml workflow push my-workflow.workflow.yaml
 ```
 
 ## Reference

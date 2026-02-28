@@ -113,18 +113,6 @@ Uploading report.pdf... done
 Files submitted.
 ```
 
-### Non-Interactive Mode
-
-Provide file paths via the `--input` flag using `file://` prefix:
-
-```bash
-# Single file
-workflow run <id> --stream --input 'upload_node=file:///path/to/report.pdf'
-
-# Multiple files
-workflow run <id> --stream --input 'upload_node=file:///path/to/file1.pdf,file:///path/to/file2.docx'
-```
-
 ## `.workflow.last_run` Context File
 
 After starting a workflow, a `.workflow.last_run` file is written to the current

@@ -121,9 +121,9 @@ class TestLoadConfigFromEnvVars:
             assert config.api_key == 'env-key'
             assert config.org_id == 'env-org'
 
-    def test_empty_env_var_treated_as_unset(self):
+    def test_empty_env_var_treated_as_unset(self, tmp_path: Path):
         with patch.dict('os.environ', {'WORKFLOW_API_HOST': ''}):
-            config = load_config()
+            config = load_config(config_path=tmp_path / 'nonexistent.yaml')
             assert config.host is None
 
 

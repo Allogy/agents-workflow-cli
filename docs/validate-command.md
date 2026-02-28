@@ -54,6 +54,7 @@ The command runs 10 validation checks:
 ### Status Types
 
 - **✓ PASS** (green) — Check passed
+- **⚠ WARN** (yellow) — Non-blocking warning; workflow can still be pushed
 - **✗ FAIL** (red) — Blocking error that prevents workflow execution
 
 ### Check 10: Unsupported Node Types
@@ -92,7 +93,7 @@ Validating: my-workflow.workflow.yaml
 │ Node Config Validation │ ✓ PASS │                           │
 └────────────────────────┴────────┴───────────────────────────┘
 
-Validation failed: 1 error, 9 passed
+Validation failed: 1 failures, 0 warnings, 9 passed
 ```
 
 ## Common Validation Errors

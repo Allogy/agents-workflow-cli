@@ -289,9 +289,11 @@ class TestListWorkflowsYAML:
 class TestListErrorHandling:
     """Test error handling for list command."""
 
-    def test_list_missing_config(self):
+    def test_list_missing_config(self, tmp_path):
         """Test that missing configuration shows clear error."""
-        result = runner.invoke(app, ['list'])
+        fake_config = tmp_path / 'nonexistent.yaml'
+        with patch('cli.config.DEFAULT_CONFIG_PATH', fake_config):
+            result = runner.invoke(app, ['list'])
 
         # Should fail without config
         assert result.exit_code != 0

@@ -423,9 +423,11 @@ class TestDeleteErrorHandling:
         assert result.exit_code != 0
         # Should show usage or error about missing argument
 
-    def test_delete_missing_config(self):
+    def test_delete_missing_config(self, tmp_path):
         """Test that missing configuration shows clear error."""
-        result = runner.invoke(app, ['delete', str(uuid4())])
+        fake_config = tmp_path / 'nonexistent.yaml'
+        with patch('cli.config.DEFAULT_CONFIG_PATH', fake_config):
+            result = runner.invoke(app, ['delete', str(uuid4())])
 
         assert result.exit_code != 0
         assert 'host' in result.output.lower() or 'config' in result.output.lower()
