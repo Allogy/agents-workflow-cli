@@ -304,6 +304,7 @@ def run_polling(
     poll_interval: float = 2.0,
     max_timeout_seconds: int | float | None = None,
     output_console: Console | None = None,
+    pending_input: dict[str, Any] | None = None,
 ) -> str:
     """Poll workflow status until terminal or HITL gate.
 
@@ -316,6 +317,8 @@ def run_polling(
         max_timeout_seconds: Maximum wall-clock time before timeout.
             Defaults to the value from get_run_timeout() (30 minutes).
         output_console: Console to use for output (for --no-color support).
+        pending_input: If provided, auto-submit this data to the first
+            WAITING_FOR_INPUT node and continue polling (BUG-4 fix).
 
     Returns:
         Final status string (COMPLETED, FAILED, WAITING_FOR_REVIEW, etc.).
@@ -347,16 +350,38 @@ def run_polling(
 
         # Normalize to uppercase for comparison (backend returns mixed case)
         status_upper = status.upper()
+        effective_status = status_upper
 
         # Defensive: check state.execution_status when top-level status is RUNNING
         # (backend may return Temporal's WorkflowExecutionStatus instead of internal state)
         if status_upper == 'RUNNING':
             exec_status = (status_resp.state or {}).get('execution_status', '').upper()
             if exec_status in _HITL_STATUSES or exec_status in _TERMINAL_STATUSES:
-                return exec_status
+                effective_status = exec_status
 
-        if status_upper in _TERMINAL_STATUSES or status_upper in _HITL_STATUSES:
-            return status
+        # Auto-submit pending input when workflow hits WAITING_FOR_INPUT (BUG-4)
+        if effective_status == 'WAITING_FOR_INPUT' and pending_input is not None:
+            waiting_node = (status_resp.state or {}).get('waiting_for_input_node_id') or (
+                status_resp.state or {}
+            ).get('current_node_id', '')
+            if waiting_node:
+                try:
+                    client.submit_input(
+                        workflow_id,
+                        run_id=run_id,
+                        node_id=waiting_node,
+                        input_data=pending_input,
+                    )
+                    pending_input = None  # Only auto-submit once
+                    out.print(f'[green]Auto-submitted input to {waiting_node}[/green]')
+                    if poll_interval > 0:
+                        time.sleep(poll_interval)
+                    continue  # Resume polling
+                except Exception as e:
+                    out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
+
+        if effective_status in _TERMINAL_STATUSES or effective_status in _HITL_STATUSES:
+            return effective_status if effective_status != status_upper else status
 
         if poll_interval > 0:
             time.sleep(poll_interval)
@@ -1139,6 +1164,7 @@ def run_command(
                 run_id,
                 total_nodes=total_nodes,
                 output_console=output_console,
+                pending_input=inputs if inputs else None,
             )
 
         # Handle final status

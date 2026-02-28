@@ -268,6 +268,94 @@ class TestRunPolling:
         assert result == 'WAITING_FOR_REVIEW'
 
 
+class TestAutoSubmitInput:
+    """BUG-4: --input should auto-submit to first INPUT node after start."""
+
+    def test_auto_submit_in_polling_mode(self) -> None:
+        """Polling mode auto-submits --input data when workflow hits WAITING_FOR_INPUT."""
+        mock_client = MagicMock()
+
+        # First poll: WAITING_FOR_INPUT, second poll (after submit): COMPLETED
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(
+                status='WAITING_FOR_INPUT',
+                current_node='input-node-1',
+                state={
+                    'execution_status': 'WAITING_FOR_INPUT',
+                    'current_node_id': 'input-node-1',
+                    'waiting_for_input_node_id': 'input-node-1',
+                },
+            ),
+            MagicMock(status='COMPLETED', current_node=None, state={}),
+        ]
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+
+        result = run_polling(
+            mock_client,
+            'wf-id',
+            'run-001',
+            poll_interval=0,
+            pending_input={'text': 'hello'},
+        )
+
+        assert result == 'COMPLETED'
+        mock_client.submit_input.assert_called_once_with(
+            'wf-id',
+            run_id='run-001',
+            node_id='input-node-1',
+            input_data={'text': 'hello'},
+        )
+
+    def test_no_auto_submit_without_pending_input(self) -> None:
+        """Without pending_input, WAITING_FOR_INPUT exits normally."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='WAITING_FOR_INPUT',
+            current_node='input_node',
+            state={'execution_status': 'WAITING_FOR_INPUT'},
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'WAITING_FOR_INPUT'
+        mock_client.submit_input.assert_not_called()
+
+    def test_auto_submit_only_once(self) -> None:
+        """Auto-submit happens only once even if workflow hits WAITING_FOR_INPUT again."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.side_effect = [
+            MagicMock(
+                status='WAITING_FOR_INPUT',
+                current_node='input-1',
+                state={
+                    'execution_status': 'WAITING_FOR_INPUT',
+                    'waiting_for_input_node_id': 'input-1',
+                },
+            ),
+            # After submit, workflow advances to second input node
+            MagicMock(
+                status='WAITING_FOR_INPUT',
+                current_node='input-2',
+                state={
+                    'execution_status': 'WAITING_FOR_INPUT',
+                    'waiting_for_input_node_id': 'input-2',
+                },
+            ),
+        ]
+        mock_client.submit_input.return_value = MagicMock(status='ok')
+
+        result = run_polling(
+            mock_client,
+            'wf-id',
+            'run-001',
+            poll_interval=0,
+            pending_input={'text': 'hello'},
+        )
+
+        # Should have auto-submitted to first node, then returned WAITING_FOR_INPUT for second
+        assert result == 'WAITING_FOR_INPUT'
+        mock_client.submit_input.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # SSE streaming tests
 # ---------------------------------------------------------------------------
