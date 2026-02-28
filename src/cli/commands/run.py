@@ -347,6 +347,14 @@ def run_polling(
 
         # Normalize to uppercase for comparison (backend returns mixed case)
         status_upper = status.upper()
+
+        # Defensive: check state.execution_status when top-level status is RUNNING
+        # (backend may return Temporal's WorkflowExecutionStatus instead of internal state)
+        if status_upper == 'RUNNING':
+            exec_status = (status_resp.state or {}).get('execution_status', '').upper()
+            if exec_status in _HITL_STATUSES or exec_status in _TERMINAL_STATUSES:
+                return exec_status
+
         if status_upper in _TERMINAL_STATUSES or status_upper in _HITL_STATUSES:
             return status
 
@@ -411,6 +419,12 @@ def _poll_until_next_event(
             out.print(f'[dim][{ts}][/dim] [blue]Processing[/blue] {current_node}')
 
         last_node = current_node
+
+        # Defensive: check state.execution_status when top-level status is RUNNING
+        if status_upper == 'RUNNING':
+            exec_status = (status_resp.state or {}).get('execution_status', '').upper()
+            if exec_status in _HITL_STATUSES or exec_status in _TERMINAL_STATUSES:
+                return exec_status
 
         if status_upper in _TERMINAL_STATUSES or status_upper in _HITL_STATUSES:
             return status_resp.status

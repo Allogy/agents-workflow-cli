@@ -243,6 +243,30 @@ class TestRunPolling:
         result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
         assert result == 'WAITING_FOR_INPUT'
 
+    def test_detects_hitl_from_state_execution_status(self) -> None:
+        """Polling detects WAITING_FOR_INPUT via state.execution_status when top-level is RUNNING."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING',
+            current_node='input_node',
+            state={'execution_status': 'WAITING_FOR_INPUT', 'current_node_id': 'input_node'},
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'WAITING_FOR_INPUT'
+
+    def test_detects_review_from_state_execution_status(self) -> None:
+        """Polling detects WAITING_FOR_REVIEW via state.execution_status when top-level is RUNNING."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING',
+            current_node='review_node',
+            state={'execution_status': 'WAITING_FOR_REVIEW', 'current_node_id': 'review_node'},
+        )
+
+        result = run_polling(mock_client, 'wf-id', 'run-id', poll_interval=0)
+        assert result == 'WAITING_FOR_REVIEW'
+
 
 # ---------------------------------------------------------------------------
 # SSE streaming tests
