@@ -86,11 +86,27 @@ workflow-cli/
       main.py                 # Typer app entry point
       client.py               # WorkflowClient — httpx-based API client
       config.py               # CLIConfig — host/api_key/org_id resolution
+      console.py              # Shared Rich console factory
       exceptions.py           # Typed API exception hierarchy
       wdf_yaml.py             # WDF YAML load/dump helpers (PyYAML wrapper)
       lockfile.py             # Lockfile management for idempotent push operations
+      last_run.py             # .workflow.last_run context file I/O
+      sse.py                  # SSE event parsing for streaming mode
+      interactive.py          # HITL interactive prompting
       commands/
-        push.py               # Push command — deploy workflows to platform
+        init.py               # Scaffold workflows from templates
+        validate.py           # Offline validation (10 checks)
+        push.py               # Deploy workflows to platform
+        pull.py               # Export workflows from platform to YAML
+        list.py               # List workflows in organization
+        delete.py             # Delete workflow by ID or name
+        run.py                # Execute workflows via Temporal
+        status.py             # Check execution status
+        input.py              # Submit data to paused INPUT nodes
+        review.py             # Submit HUMAN_REVIEW decisions
+      validation/
+        runner.py             # Validation runner (10 checks)
+      templates/              # 7 built-in scaffold templates
   shared-models/              # agents-workflow-models (published separately)
     pyproject.toml
     src/workflow_models/
@@ -102,36 +118,38 @@ workflow-cli/
         nodes.py              #   NodeDefinition + 10 node config schemas
         edges.py              #   EdgeDefinition (source/target slug-based)
         workflow.py           #   WorkflowDefinition (root model with validation)
+        validation.py         #   Graph validation (reachability, cycles, variables)
         variable_ref.py       #   VariableRef + extract_variable_refs()
     examples/                 # Example .workflow.yaml files
-      invoice-processing.workflow.yaml
-      all-node-types.workflow.yaml
-      linear-pipeline.workflow.yaml
-      rag-workflow.workflow.yaml
-      agent-review.workflow.yaml
-      retrieval-pipeline.workflow.yaml
-    tests/
-      test_wdf_nodes.py      # Node config schema tests
-      test_wdf_workflow.py    # WorkflowDefinition / EdgeDefinition tests
-      test_wdf_variable_ref.py # Variable reference extraction tests
-      test_wdf_examples.py   # Validates example YAML files parse correctly
+    tests/                    # Shared-models tests
   scripts/
     release/
       validate_release.py     # Semver + tag/version validation
-  tests/
+  tests/                      # CLI tests (24 test files)
     conftest.py               # Shared test fixtures
     test_client.py            # WorkflowClient unit tests (pytest-httpx)
     test_exceptions.py        # API exception hierarchy tests
-    test_lockfile.py          # Lockfile management tests (38 tests)
-    test_push_command.py      # Push command unit tests (49 tests)
-    test_release_validation.py # Release validation coverage
-    test_shared_models_integration.py
+    test_lockfile.py          # Lockfile management tests
+    test_push_command.py      # Push command unit tests
+    test_pull_command.py      # Pull command unit tests
+    test_run_command.py       # Run command unit tests
+    test_list_command.py      # List command unit tests
+    test_delete_command.py    # Delete command unit tests
+    test_status_command.py    # Status command unit tests
+    test_input_command.py     # Input command unit tests
+    test_review_command.py    # Review command unit tests
+    test_validate_command.py  # Validation runner tests
+    test_init_command.py      # Init command tests
+    test_config.py            # Configuration tests
     test_wdf_yaml_roundtrip.py # WDF YAML round-trip serialization tests
+    ...                       # Additional test files
   docs/
     codeartifact.md           # CodeArtifact setup, publishing, CI/CD
     init-command.md           # init command documentation
     validate-command.md       # validate command documentation
     push-command.md           # push command documentation
+    pull-command.md           # pull command documentation
+    run-command.md            # run command documentation
   .pre-commit-config.yaml     # Pre-commit hook configuration
   README.md                   # This file
 ```
@@ -154,6 +172,28 @@ uv run workflow validate my-workflow.workflow.yaml
 
 # Push a workflow to the platform
 uv run workflow push my-workflow.workflow.yaml
+
+# Pull a workflow from the platform
+uv run workflow pull "Invoice Processing" -o invoice.workflow.yaml
+
+# List all workflows
+uv run workflow list
+uv run workflow list --format json
+
+# Delete a workflow
+uv run workflow delete "Invoice Processing" --force
+
+# Run a workflow via Temporal
+uv run workflow run "Invoice Processing" --stream --interactive
+
+# Check execution status
+uv run workflow status
+
+# Submit input to a paused INPUT node
+uv run workflow input --node-id <id> --data '{"text": "Hello"}'
+
+# Submit a review decision to a paused HUMAN_REVIEW node
+uv run workflow review --run-id <id> --node-id <id> --approve
 ```
 
 ### Commands
@@ -163,6 +203,13 @@ uv run workflow push my-workflow.workflow.yaml
 | `init` | Scaffold a new workflow from a template | [`docs/init-command.md`](docs/init-command.md) |
 | `validate` | Validate a workflow definition file offline | [`docs/validate-command.md`](docs/validate-command.md) |
 | `push` | Deploy a workflow to the platform (create or update) | [`docs/push-command.md`](docs/push-command.md) |
+| `pull` | Export a workflow from the platform to YAML | [`docs/pull-command.md`](docs/pull-command.md) |
+| `list` | List workflows in the organization | |
+| `delete` | Delete a workflow by ID or name | |
+| `run` | Execute a workflow via Temporal runtime | [`docs/run-command.md`](docs/run-command.md) |
+| `status` | Check workflow execution status | |
+| `input` | Submit data to a paused INPUT node | |
+| `review` | Submit a HUMAN_REVIEW decision | |
 
 ## API Client
 
@@ -292,7 +339,7 @@ yaml_str = dump_workflow(workflow)
 See `shared-models/examples/` for reference YAML files:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice processing pipeline
-- `all-node-types.workflow.yaml` — reference file demonstrating all 10 node types
+- `all-node-types.workflow.yaml` — reference file demonstrating all 9 CLI-supported node types
 - `linear-pipeline.workflow.yaml` — 3-node pipeline matching backend `linear_pipeline.json`
 - `rag-workflow.workflow.yaml` — 4-node RAG pipeline matching backend `rag_workflow.json`
 - `agent-review.workflow.yaml` — 4-node agent + human review pipeline matching backend `agent_review.json`
@@ -381,7 +428,7 @@ save_lockfile(workflow_path, lock)
 ### Testing Lockfile
 
 ```bash
-# Run lockfile tests (30 unit tests)
+# Run lockfile tests (38 unit tests)
 uv run pytest tests/test_lockfile.py -v
 
 # Test coverage includes:

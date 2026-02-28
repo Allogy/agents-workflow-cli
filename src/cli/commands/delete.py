@@ -132,22 +132,17 @@ def delete_command(config: CLIConfig, identifier: str, force: bool = False) -> N
                 except Exception:
                     workflow_name = 'Untitled'
             except Exception as e:
-                console.print(f'[bold red]Error:[/bold red] Workflow not found: {identifier}')
-                raise NotFoundError(f'Workflow {identifier} not found', status_code=404) from e
+                raise NotFoundError(f'Workflow not found: {identifier}', status_code=404) from e
         else:
             # Search by name
             workflow_name = identifier
             try:
                 workflow_id = find_workflow_by_name(client, identifier, config.org_id)  # type: ignore[arg-type]
-            except ValueError as e:
-                console.print(f'[bold red]Error:[/bold red] {e}')
+            except ValueError:
                 raise
 
             if workflow_id is None:
-                console.print(
-                    f'[bold red]Error:[/bold red] No workflow found with name "{identifier}"'
-                )
-                raise NotFoundError(f'Workflow "{identifier}" not found', status_code=404)
+                raise NotFoundError(f'No workflow found with name "{identifier}"', status_code=404)
 
         # Show confirmation prompt (unless --force)
         if not force:
@@ -168,6 +163,5 @@ def delete_command(config: CLIConfig, identifier: str, force: bool = False) -> N
                 f'[bold green]✓[/bold green] Successfully deleted workflow '
                 f'"{workflow_name}" ({workflow_id[:8]}...)'
             )
-        except Exception as e:
-            console.print(f'[bold red]Error:[/bold red] Failed to delete workflow: {e}')
+        except Exception:
             raise

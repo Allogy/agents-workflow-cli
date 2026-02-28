@@ -1,6 +1,6 @@
 """Validation package for workflow definitions.
 
-Provides the validation runner that orchestrates all 9 validation checks
+Provides the validation runner that orchestrates all 10 validation checks
 for offline workflow definition validation.
 """
 

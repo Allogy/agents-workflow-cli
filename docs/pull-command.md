@@ -34,7 +34,7 @@ The pull command follows a multi-stage workflow:
    - `knowledge_base_id` → `knowledge_base_name` (via API lookup)
 4. **Convert to WDF** — Transforms API response to `.workflow.yaml` format:
    - Generates readable node slugs from `function_name` (fallback: `config_type`)
-   - Handles slug collisions with `-2`, `-3` suffixes
+   - Handles slug collisions with `_2`, `_3` suffixes
    - Maps entry/exit UUIDs to slugs
    - Strips visual-only data (positions, edge paths)
 5. **Write `.workflow.yaml`** — Serializes WDF to YAML
@@ -46,13 +46,13 @@ Node slugs in the YAML file are generated from server-side data:
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1st | `function_name` (if set) | `invoice-agent` |
+| 1st | `function_name` (if set) | `invoice_agent` |
 | 2nd | `config_type` (fallback) | `llm-call` |
 
 **Slug rules:**
-- Lowercase, hyphens only (no special characters)
-- Underscores converted to hyphens
-- Collisions resolved with numeric suffixes: `agent`, `agent-2`, `agent-3`
+- Derived from `function_name`: lowercased, underscores preserved (for backend variable reference compatibility)
+- Derived from `config_type` (fallback): lowercased, underscores converted to hyphens
+- Collisions resolved with numeric suffixes: `agent`, `agent_2`, `agent_3`
 
 ## Name-Based Lookup
 

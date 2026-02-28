@@ -133,7 +133,7 @@ def validate(
 ) -> None:
     """Validate a workflow definition file offline.
 
-    Runs 9 validation checks with no API calls:
+    Runs 10 validation checks with no API calls:
     - YAML syntax
     - WDF schema conformance
     - Node type recognition
@@ -143,8 +143,9 @@ def validate(
     - Cycle detection
     - Variable references
     - Node config validation
+    - Unsupported node types
 
-    Exit codes: 0 = pass (warnings OK), 1 = failure
+    Exit codes: 0 = pass, 1 = failure
     """
     validate_command(file_path)
 

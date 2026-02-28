@@ -8,9 +8,6 @@ Push local `.workflow.yaml` files to the Agents Platform, creating new workflows
 # Push a workflow file
 workflow push my-workflow.workflow.yaml
 
-# Push from current directory (uses *.workflow.yaml)
-workflow push
-
 # First push creates, subsequent pushes update
 workflow push my-workflow.workflow.yaml  # Creates workflow
 workflow push my-workflow.workflow.yaml  # Updates same workflow (idempotent)
@@ -241,9 +238,9 @@ The push command requires CLI configuration (same as other commands):
 
 **Environment variables:**
 ```bash
-export WORKFLOW_CLI_HOST=https://app.allogy.com
-export WORKFLOW_CLI_API_KEY=your-api-key
-export WORKFLOW_CLI_ORG_ID=your-org-uuid
+export WORKFLOW_API_HOST=https://app.allogy.com
+export WORKFLOW_API_KEY=your-api-key
+export WORKFLOW_ORG_ID=your-org-uuid
 ```
 
 **Or config file (`~/.workflow/config.yaml`):**

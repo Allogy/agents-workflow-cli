@@ -52,7 +52,7 @@ src/cli/
   exceptions.py        # CLI-specific exceptions
   last_run.py           # .workflow.last_run context file I/O
   sse.py               # SSE event parsing for streaming mode
-  commands/             # One module per CLI command (init, validate, push, pull, list, delete, run)
+  commands/             # One module per CLI command (init, validate, push, pull, list, delete, run, status, input, review)
   validation/           # Validation runner (10 offline checks)
   templates/            # Scaffold templates for `workflow init`
 
@@ -64,7 +64,7 @@ shared-models/src/workflow_models/
 
 ### Key Conventions
 
-- **WDF (Workflow Definition Format):** Human-authored YAML with slug-based node references, variable templates (`{{slug.output.field}}`), and 12 node types.
+- **WDF (Workflow Definition Format):** Human-authored YAML with slug-based node references, variable templates (`{{slug.output.field}}`), and 10 node types (9 CLI-supported + document_extraction).
 - **Lockfile (`.workflow.lock`):** Tracks slug-to-UUID mappings for idempotent deploys. 3-tier dependency resolution: UUID passthrough, lockfile cache, API lookup.
 - **API client:** `WorkflowClient` using httpx with `X-API-Key` auth. Config precedence: CLI flags, env vars, `~/.workflow/config.yaml`, defaults.
 - **Shared models (`shared-models/`):** Pure Pydantic v2 with zero SQLAlchemy dependency. Contains API schemas (`schemas/`) and WDF models (`wdf/`). Published as `agents-workflow-models` to CodeArtifact.

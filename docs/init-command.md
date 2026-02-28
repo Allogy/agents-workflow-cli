@@ -150,10 +150,10 @@ After scaffolding, customize the generated `.workflow.yaml` file:
 ## Integration with Other Commands
 
 ```bash
-# Scaffold → Validate → Deploy
+# Scaffold → Validate → Push
 workflow init --template rag-qa -o my-qa.workflow.yaml
 workflow validate my-qa.workflow.yaml
-# (future) workflow deploy my-qa.workflow.yaml
+workflow push my-qa.workflow.yaml
 ```
 
 ## Reference

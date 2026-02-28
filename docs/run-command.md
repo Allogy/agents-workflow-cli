@@ -5,7 +5,7 @@ Execute a workflow via the Temporal runtime from the CLI.
 ## Usage
 
 ```
-workflow run <identifier> [--input JSON|@file] [--stream] [--no-follow]
+workflow run <identifier> [--input JSON|@file] [--stream] [--interactive] [--no-follow] [--verbose] [--no-color]
 ```
 
 ## Arguments
@@ -18,9 +18,12 @@ workflow run <identifier> [--input JSON|@file] [--stream] [--no-follow]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--input` | `-i` | Initial input data as JSON string or `@filepath` |
+| `--input` | | Initial input data as JSON string or `@filepath` |
 | `--stream` | | Use SSE streaming instead of polling |
+| `--interactive` | `-i` | Enable interactive HITL mode for inline input/review prompts. Requires `--stream` |
 | `--no-follow` | | Start the workflow and exit immediately |
+| `--verbose` | | Show detailed multi-line SSE output with payload excerpts |
+| `--no-color` | | Disable colored output (also respects `NO_COLOR` env var) |
 
 ## Execution Modes
 
@@ -141,7 +144,8 @@ started_at: '2026-02-25T10:30:00+00:00'
 | Code | Meaning |
 |------|---------|
 | 0 | Workflow completed or paused at HITL gate |
-| 1 | Workflow failed or command error |
+| 1 | Runtime error (network, server, timeout) |
+| 2 | User error (bad input, not found, invalid JSON) |
 
 ## Examples
 
@@ -155,6 +159,16 @@ workflow run "Invoice Processing" --input '{"question": "What is AI?"}'
 # Stream events in real-time
 workflow run my-workflow --input @input.json --stream
 
+# Stream with verbose output
+workflow run my-workflow --stream --verbose
+
+# Interactive HITL mode (inline prompts for input/review)
+workflow run my-workflow --stream --interactive
+workflow run my-workflow --stream -i
+
 # Fire-and-forget
 workflow run my-workflow --no-follow
+
+# Disable color for CI pipelines
+workflow run my-workflow --stream --no-color
 ```

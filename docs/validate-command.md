@@ -24,7 +24,7 @@ uv run workflow validate shared-models/examples/linear-pipeline.workflow.yaml
 
 ## Exit Codes
 
-- **0** = All checks passed (warnings are allowed)
+- **0** = All checks passed
 - **1** = One or more checks failed
 
 This makes it perfect for CI/CD pipelines:
@@ -45,7 +45,7 @@ The command runs 10 validation checks:
 | 3 | **Node Type Recognition** | Ensures all node types are valid (10 supported types) | FAIL |
 | 4 | **Edge References** | Ensures edge `from`/`to` reference existing nodes | FAIL |
 | 5 | **Entry/Exit Points** | Ensures entry/exit reference existing nodes | FAIL |
-| 6 | **Graph Reachability** | Ensures all nodes are reachable from entry via DFS | WARN |
+| 6 | **Graph Reachability** | Ensures all nodes are reachable from entry via DFS | FAIL |
 | 7 | **Cycle Detection** | Detects circular dependencies (DFS 3-color algorithm, excludes RECURSIVE edges) | FAIL |
 | 8 | **Variable References** | Validates `{{slug.output.field}}` references point to existing nodes | FAIL |
 | 9 | **Node Config Validation** | Validates node-type-specific config (e.g., LLM_CALL requires `model` and `template`) | FAIL |
@@ -54,7 +54,6 @@ The command runs 10 validation checks:
 ### Status Types
 
 - **✓ PASS** (green) — Check passed
-- **⚠ WARN** (yellow) — Non-blocking issue detected (e.g., unreachable nodes)
 - **✗ FAIL** (red) — Blocking error that prevents workflow execution
 
 ### Check 10: Unsupported Node Types
@@ -86,14 +85,14 @@ Validating: my-workflow.workflow.yaml
 │ Graph Reachability     │ ✓ PASS │                           │
 │ Cycle Detection        │ ✗ FAIL │ Cycle detected: a -> b -> a │
 │ Variable References    │ ✓ PASS │                           │
+│ Unsupported Node Types │ ✓ PASS │                           │
 │ Node Type Recognition  │ ✓ PASS │                           │
 │ Edge References        │ ✓ PASS │                           │
 │ Entry/Exit Points      │ ✓ PASS │                           │
 │ Node Config Validation │ ✓ PASS │                           │
-│ Unsupported Node Types │ ✓ PASS │                           │
 └────────────────────────┴────────┴───────────────────────────┘
 
-Validation failed: 1 failures, 0 warnings, 9 passed
+Validation failed: 1 error, 9 passed
 ```
 
 ## Common Validation Errors
@@ -128,7 +127,7 @@ Cycle detected: node_a -> node_b -> node_c -> node_a
 
 ### 4. Unreachable Nodes
 
-**Warning:**
+**Error:**
 ```
 Unreachable nodes from entry point: orphan_node
 ```
@@ -286,7 +285,7 @@ done
 ## Tips
 
 1. **Validate early, validate often** — Run validation as you author workflows, not just before deployment
-2. **Warnings are informative** — Unreachable nodes won't block validation but indicate potential issues
+2. **Unreachable nodes are errors** — All nodes must be reachable from the entry point to pass validation
 3. **Use example files** — Start from `shared-models/examples/*.workflow.yaml` for reference
 4. **Check variable references** — The validator catches typos in `{{slug.output.field}}` patterns
 5. **Understand recursive edges** — Use `type: RECURSIVE` for intentional loops (e.g., retry logic)

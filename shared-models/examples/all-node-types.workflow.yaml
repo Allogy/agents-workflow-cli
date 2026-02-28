@@ -137,10 +137,21 @@ edges:
   # Main path: text_input -> agent -> rag -> llm -> output -> review
   - from: text_input
     to: agent_node
+    type: CONDITIONAL
+    condition: route == "agent"
   - from: agent_node
     to: rag_node
   - from: rag_node
     to: llm_node
+  # Branching paths from text_input to exercise all input types
+  - from: text_input
+    to: form_input
+    type: CONDITIONAL
+    condition: route == "form"
+  - from: text_input
+    to: file_input
+    type: CONDITIONAL
+    condition: route == "file"
   # Parallel inputs feed into llm_node
   - from: form_input
     to: search_node

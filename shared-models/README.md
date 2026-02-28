@@ -130,13 +130,13 @@ workflow = WorkflowDefinition(
     description='A simple two-node pipeline',
     nodes={
         'user-input': NodeDefinition(
-            type='PLAIN_TXT_INPUT',
+            type='plain_txt_input',
             label='User Input',
             execution_mode='INPUT',
             config=PlainTxtInputConfig(placeholder='Enter your question...'),
         ),
         'agent': NodeDefinition(
-            type='AGENT',
+            type='agent',
             label='Assistant',
             execution_mode='MESSAGES',
             config=AgentConfig(
@@ -162,7 +162,7 @@ refs = extract_variable_refs('Answer: {{agent.output.response}}')
 Example `.workflow.yaml` files are in the [`examples/`](examples/) directory:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice pipeline
-- `all-node-types.workflow.yaml` — reference file with all 10 node types
+- `all-node-types.workflow.yaml` — reference file with all 9 CLI-supported node types
 - `linear-pipeline.workflow.yaml` — 3-node pipeline (text input → LLM → structured output)
 - `rag-workflow.workflow.yaml` — 4-node RAG pipeline (structured input → file upload → LLM → RAG agent)
 - `agent-review.workflow.yaml` — 4-node agent pipeline with human review gate
