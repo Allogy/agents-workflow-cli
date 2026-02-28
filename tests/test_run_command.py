@@ -2102,6 +2102,19 @@ class TestPollUntilNextEvent:
         assert 'node-a' in output
         assert 'node-b' in output
 
+    def test_detects_hitl_from_state_execution_status(self) -> None:
+        """Detects WAITING_FOR_INPUT via state.execution_status when top-level is RUNNING."""
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='RUNNING',
+            current_node='input_node',
+            state={'execution_status': 'WAITING_FOR_INPUT', 'current_node_id': 'input_node'},
+        )
+
+        with patch('cli.commands.run.time.sleep'):
+            result = _poll_until_next_event(mock_client, 'wf-id', 'run-id')
+        assert result == 'WAITING_FOR_INPUT'
+
 
 class TestRunInteractiveLoop:
     """Unit tests for the _run_interactive orchestration function."""

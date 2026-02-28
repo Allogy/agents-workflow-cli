@@ -361,9 +361,12 @@ def run_polling(
 
         # Auto-submit pending input when workflow hits WAITING_FOR_INPUT (BUG-4)
         if effective_status == 'WAITING_FOR_INPUT' and pending_input is not None:
-            waiting_node = (status_resp.state or {}).get('waiting_for_input_node_id') or (
-                status_resp.state or {}
-            ).get('current_node_id', '')
+            _state = status_resp.state or {}
+            waiting_node = (
+                _state.get('waiting_for_input_node_id')
+                or _state.get('waiting_input_node_id')
+                or _state.get('current_node_id', '')
+            )
             if waiting_node:
                 try:
                     client.submit_input(
@@ -378,6 +381,7 @@ def run_polling(
                         time.sleep(poll_interval)
                     continue  # Resume polling
                 except Exception as e:
+                    pending_input = None  # Don't retry on failure
                     out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
 
         if effective_status in _TERMINAL_STATUSES or effective_status in _HITL_STATUSES:
