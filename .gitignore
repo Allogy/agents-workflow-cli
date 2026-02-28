@@ -44,3 +44,6 @@ htmlcov/
 .workflow.last_run
 .claude/agent-memory/code-reviewer/*.md
 docs/plans/*.md
+
+# Worktrees
+.worktrees/
