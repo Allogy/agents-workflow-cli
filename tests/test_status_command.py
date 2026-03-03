@@ -240,6 +240,33 @@ class TestStatusPausedNodeHints:
         assert '--approve' in captured.out
 
 
+class TestResolveRunContextWorkflowOverride:
+    """Test _resolve_run_context with explicit workflow_id override."""
+
+    def test_explicit_workflow_id_and_run_id(self, tmp_path):
+        """Both overrides provided — uses them directly, ignores .last_run."""
+        from cli.commands.status import _resolve_run_context
+
+        wf_id, rid = _resolve_run_context(
+            'run-override',
+            tmp_path,
+            workflow_id_override='wf-override',
+        )
+        assert wf_id == 'wf-override'
+        assert rid == 'run-override'
+
+    def test_workflow_override_without_run_id_raises(self, tmp_path):
+        """workflow_id override without run_id should raise ValueError."""
+        from cli.commands.status import _resolve_run_context
+
+        with pytest.raises(ValueError, match='--run-id'):
+            _resolve_run_context(
+                None,
+                tmp_path,
+                workflow_id_override='wf-override',
+            )
+
+
 # ---------------------------------------------------------------------------
 # UX-01: Rich Table output verification
 # ---------------------------------------------------------------------------

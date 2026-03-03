@@ -482,6 +482,13 @@ def status(
             help='Output raw JSON response.',
         ),
     ] = False,
+    workflow_id: Annotated[
+        str | None,
+        typer.Option(
+            '--workflow-id',
+            help='Workflow UUID (overrides .last_run). Requires --run-id.',
+        ),
+    ] = None,
 ) -> None:
     """Check workflow execution status with node-by-node detail.
 
@@ -501,7 +508,7 @@ def status(
     """
     config = get_config()
     try:
-        status_command(config, run_id, json_output=json_output)
+        status_command(config, run_id, json_output=json_output, workflow_id_override=workflow_id)
     except (ValueError, FileNotFoundError) as e:
         get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
@@ -541,6 +548,13 @@ def input_cmd(
             help='Output raw JSON response.',
         ),
     ] = False,
+    workflow_id: Annotated[
+        str | None,
+        typer.Option(
+            '--workflow-id',
+            help='Workflow UUID (overrides .last_run). Requires --run-id.',
+        ),
+    ] = None,
 ) -> None:
     """Submit data to a paused INPUT node.
 
@@ -562,7 +576,14 @@ def input_cmd(
     """
     config = get_config()
     try:
-        input_command(config, node_id, data, run_id=run_id, json_output=json_output)
+        input_command(
+            config,
+            node_id,
+            data,
+            run_id=run_id,
+            json_output=json_output,
+            workflow_id_override=workflow_id,
+        )
     except (ValueError, FileNotFoundError) as e:
         get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
@@ -623,6 +644,13 @@ def review(
             help='Output raw JSON response.',
         ),
     ] = False,
+    workflow_id: Annotated[
+        str | None,
+        typer.Option(
+            '--workflow-id',
+            help='Workflow UUID (overrides .last_run). Requires --run-id.',
+        ),
+    ] = None,
 ) -> None:
     """Submit a human review decision to a paused HUMAN_REVIEW node.
 
@@ -653,6 +681,7 @@ def review(
             revise=revise,
             comment=comment,
             json_output=json_output,
+            workflow_id_override=workflow_id,
         )
     except (ValueError, FileNotFoundError) as e:
         get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)

@@ -49,6 +49,7 @@ def review_command(
     comment: str | None = None,
     json_output: bool = False,
     working_dir: Path | None = None,
+    workflow_id_override: str | None = None,
 ) -> None:
     """Submit a human review decision to a paused HUMAN_REVIEW node.
 
@@ -66,6 +67,7 @@ def review_command(
         comment: Feedback text (required with reject/revise).
         json_output: If True, print raw JSON response and return.
         working_dir: Directory for .last_run lookup (defaults to cwd).
+        workflow_id_override: Explicit workflow ID (overrides .last_run). Requires run_id.
 
     Raises:
         ValueError: If flags are invalid, node is not a paused HUMAN_REVIEW,
@@ -88,7 +90,9 @@ def review_command(
         raise ValueError('--comment is required with --reject and --revise.')
 
     # Resolve run context (require_explicit=True: --run-id is mandatory)
-    workflow_id, resolved_run_id = _resolve_run_context(run_id, cwd, require_explicit=True)
+    workflow_id, resolved_run_id = _resolve_run_context(
+        run_id, cwd, require_explicit=True, workflow_id_override=workflow_id_override
+    )
 
     # Pre-flight validation: confirm the specified node is a paused HUMAN_REVIEW node
     with WorkflowClient.from_config(config) as client:
