@@ -449,3 +449,43 @@ class TestInputFallbackToCurrentNodeId:
         )
 
         mock_client.submit_input.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# submitted_unconfirmed: warning instead of success
+# ---------------------------------------------------------------------------
+
+
+class TestUnconfirmedHandling:
+    """Test handling of submitted_unconfirmed response."""
+
+    @patch('cli.commands.input.Confirm.ask', return_value=True)
+    @patch('cli.commands.input.WorkflowClient')
+    def test_unconfirmed_prints_warning(self, mock_client_class, mock_confirm, tmp_path, capsys):
+        """When API returns unconfirmed, CLI prints a warning instead of success."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = MagicMock()
+        mock_client.get_workflow_status.return_value = _make_status_response()
+        mock_client.list_nodes.return_value = _make_nodes()
+        mock_client.submit_input.return_value = SubmitInputResponse(
+            workflow_id=_WORKFLOW_ID,
+            node_id=_NODE_ID,
+            status='submitted_unconfirmed',
+            message='Input submitted but delivery not yet confirmed.',
+        )
+        _setup_mock_client(mock_client_class, mock_client)
+
+        config = _make_mock_config()
+        input_command(
+            config,
+            node_id=_NODE_ID,
+            data='{"text": "hello"}',
+            working_dir=tmp_path,
+        )
+
+        mock_client.submit_input.assert_called_once()
+        captured = capsys.readouterr()
+        assert 'not yet confirmed' in captured.out or 'unconfirmed' in captured.out.lower()

@@ -141,4 +141,10 @@ def input_command(
         print(json.dumps(resp.model_dump(), indent=2))
         return
 
-    console.print('[green]Input submitted.[/green]')
+    if resp.status == 'submitted_unconfirmed':
+        console.print(
+            '[yellow]Input submitted but not yet confirmed.[/yellow] '
+            'Use [cyan]workflow status[/cyan] to verify the workflow advanced.'
+        )
+    else:
+        console.print('[green]Input submitted.[/green]')
