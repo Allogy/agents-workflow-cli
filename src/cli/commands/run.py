@@ -800,7 +800,9 @@ def run_streaming(
         if last_event_type.upper() in _SSE_HITL_EVENTS:
             # Print actionable HITL hint
             hitl_node_id = event.data.get('node_id', '<node-id>')
-            if last_event_type.upper() == 'WAITING_FOR_INPUT':
+            if last_event_type.upper() == 'WAITING_FOR_INPUT' and not (
+                pending_input is not None and submit_input_fn is not None
+            ):
                 out.print(
                     f"  [dim]Next: workflow input --node-id {hitl_node_id} --data '{{...}}'[/dim]"
                 )
@@ -818,6 +820,7 @@ def run_streaming(
                     pending_input = None  # Only auto-submit once
                 except Exception as e:
                     out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
+                    pending_input = None  # Don't retry on failure
             return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         if last_event_type.upper() in _SSE_TERMINAL_EVENTS:
@@ -1118,11 +1121,11 @@ def run_command(
                     verbose=verbose,
                     output_console=output_console,
                     pending_input=inputs if inputs else None,
-                    submit_input_fn=lambda node_id, data: client.submit_input(
+                    submit_input_fn=lambda nid, payload: client.submit_input(
                         workflow_id,
                         run_id=run_id,
-                        node_id=node_id,
-                        input_data=data,
+                        node_id=nid,
+                        input_data=payload,
                     ),
                 )
                 final_status = result.final_event
