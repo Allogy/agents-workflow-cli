@@ -28,7 +28,7 @@ import re
 import sys
 import time
 import uuid as uuid_mod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -682,6 +682,8 @@ def run_streaming(
     max_timeout_seconds: int | float | None = None,
     verbose: bool = False,
     output_console: Console | None = None,
+    pending_input: dict[str, Any] | None = None,
+    submit_input_fn: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> StreamResult:
     """Process SSE event lines until terminal or HITL event.
 
@@ -692,6 +694,8 @@ def run_streaming(
             Defaults to the value from get_run_timeout() (30 minutes).
         verbose: Use verbose multi-line format instead of compact.
         output_console: Console to use for output (for --no-color support).
+        pending_input: Pre-supplied input data to auto-submit on WAITING_FOR_INPUT (BUG-4).
+        submit_input_fn: Callable(node_id, data) used to submit pending_input automatically.
 
     Returns:
         StreamResult with final event type and accumulated node results.
@@ -802,6 +806,18 @@ def run_streaming(
                 )
             elif last_event_type.upper() == 'WAITING_FOR_REVIEW':
                 out.print('  [dim]Next: workflow review --approve[/dim]')
+            # Auto-submit pending input in streaming mode (BUG-4)
+            if (
+                last_event_type.upper() == 'WAITING_FOR_INPUT'
+                and pending_input is not None
+                and submit_input_fn is not None
+            ):
+                try:
+                    submit_input_fn(hitl_node_id, pending_input)
+                    out.print(f'[green]Auto-submitted input to {hitl_node_id}[/green]')
+                    pending_input = None  # Only auto-submit once
+                except Exception as e:
+                    out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
             return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         if last_event_type.upper() in _SSE_TERMINAL_EVENTS:
@@ -1101,6 +1117,13 @@ def run_command(
                     total_nodes=total_nodes,
                     verbose=verbose,
                     output_console=output_console,
+                    pending_input=inputs if inputs else None,
+                    submit_input_fn=lambda node_id, data: client.submit_input(
+                        workflow_id,
+                        run_id=run_id,
+                        node_id=node_id,
+                        input_data=data,
+                    ),
                 )
                 final_status = result.final_event
 
@@ -1157,6 +1180,11 @@ def run_command(
             if no_follow:
                 output_console.print(f'[green]Workflow started.[/green] Run ID: {run_id}')
                 output_console.print(f'[dim]Check status: workflow status {run_id}[/dim]')
+                if inputs:
+                    output_console.print(
+                        '[yellow]Note:[/yellow] --input data is not auto-submitted in --no-follow mode. '
+                        f"Use: [cyan]workflow input {run_id} --data '{{...}}'[/cyan]"
+                    )
                 return
 
             # Polling mode
