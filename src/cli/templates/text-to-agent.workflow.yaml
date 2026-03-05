@@ -29,6 +29,7 @@ nodes:
       temperature: 0.7
       maxTokens: 2048
       tools: []
+      primaryInput: "{{user_input.output.text}}"
 
 edges:
   - from: user_input

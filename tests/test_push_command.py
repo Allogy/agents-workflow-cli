@@ -621,6 +621,44 @@ class TestBuildNodeParameters:
         assert params['searchQuery'] == 'static query text'
 
 
+class TestAgentNodePrimaryInput:
+    """Test primaryInput handling for agent-type nodes."""
+
+    def test_agent_node_primary_input_slug_replaced(self):
+        """Test that primaryInput slug references are replaced with UUIDs for agent nodes."""
+        input_uuid = UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+        slug_to_uuid = {'input_node': input_uuid}
+        node_config = {
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input_node.output.text}}',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='agent',
+            execution_mode='MESSAGES',
+            label='Assistant',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'agent', node_config, slug_to_uuid)
+        assert params['primaryInput'] == f'{{{{{str(input_uuid)}.output.text}}}}'
+        assert 'input_node' not in params['primaryInput']
+
+    def test_agent_node_without_primary_input_omits_key(self):
+        """Test that primaryInput key is absent when not set in node config (backward compat)."""
+        node_config = {
+            'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+            'system_prompt': 'You are helpful.',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='agent',
+            execution_mode='MESSAGES',
+            label='Assistant',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'agent', node_config, {})
+        assert 'primaryInput' not in params
+
+
 class TestWdfToApiPayloadParameters:
     """Test that wdf_to_api_payload populates parameters correctly."""
 
