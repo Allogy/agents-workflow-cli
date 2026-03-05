@@ -89,6 +89,7 @@ class AgentConfig(BaseModel):
     maxTokens: int | None = Field(default=None, gt=0)
     tools: list[Any] | None = None
     agentId: str | None = None
+    primaryInput: str | None = None
 
 
 class RagAgentConfig(BaseModel):

@@ -356,6 +356,11 @@ def build_node_parameters(
         for key in ('model', 'system_prompt', 'temperature', 'maxTokens'):
             if key in node_config:
                 params[key] = node_config[key]
+        if 'primaryInput' in node_config:
+            # Replace slug references with UUID references
+            params['primaryInput'] = _replace_slugs_with_uuids(
+                node_config['primaryInput'], slug_to_uuid
+            )
 
     elif node_type == 'rag_agent':
         if 'agent_id' in node_config:
