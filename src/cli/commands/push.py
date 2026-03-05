@@ -353,9 +353,13 @@ def build_node_parameters(
         # agentId goes in parameters (already resolved from agent_name)
         if 'agent_id' in node_config:
             params['agentId'] = node_config['agent_id']
-        for key in ('model', 'system_prompt', 'temperature', 'maxTokens'):
+        for key in ('model', 'temperature', 'maxTokens'):
             if key in node_config:
                 params[key] = node_config[key]
+        if 'system_prompt' in node_config:
+            params['systemPrompt'] = node_config[
+                'system_prompt'
+            ]  # translate to camelCase for Temporal
         if 'primaryInput' in node_config:
             # Replace slug references with UUID references
             params['primaryInput'] = _replace_slugs_with_uuids(
