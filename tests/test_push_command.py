@@ -555,7 +555,7 @@ class TestBuildNodeParameters:
         assert params['type'] == 'agent'
         assert params['agentId'] == node_config['agent_id']
         assert params['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert params['system_prompt'] == 'You are helpful.'
+        assert params['systemPrompt'] == 'You are helpful.'
 
     def test_common_fields_always_present(self):
         """Test that common UI fields are always present."""
