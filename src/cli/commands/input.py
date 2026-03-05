@@ -62,9 +62,12 @@ def input_command(
     cwd = working_dir or Path.cwd()
 
     # Resolve workflow_id and run_id from .last_run or explicit override
-    workflow_id, resolved_run_id = _resolve_run_context(
-        run_id, cwd, workflow_id_override=workflow_id_override
-    )
+    if workflow_id_override and run_id:
+        workflow_id, resolved_run_id = workflow_id_override, run_id
+    elif workflow_id_override and not run_id:
+        raise ValueError('--workflow-id requires --run-id.')
+    else:
+        workflow_id, resolved_run_id = _resolve_run_context(run_id, cwd)
 
     # Parse data payload (handles None, JSON string, @filepath)
     data_dict: dict[str, Any] = parse_input_arg(data)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import UUID
@@ -128,7 +129,7 @@ class TestStatusExplicitRunId:
 
     @patch('cli.commands.status.WorkflowClient')
     def test_status_with_explicit_run_id(self, mock_client_class, tmp_path):
-        """Explicit run-id argument overrides .last_run run_id."""
+        """Explicit run-id + workflow-id bypasses .last_run entirely."""
         save_last_run(tmp_path, _make_last_run_context())
 
         mock_client = MagicMock()
@@ -142,9 +143,10 @@ class TestStatusExplicitRunId:
             run_id=explicit_run_id,
             json_output=False,
             working_dir=tmp_path,
+            workflow_id_override=_WORKFLOW_ID,
         )
 
-        # Should use the explicit run_id, NOT the .last_run run_id
+        # Should use the explicit run_id and workflow_id, bypassing .last_run
         mock_client.get_workflow_status.assert_called_once_with(_WORKFLOW_ID, explicit_run_id)
 
 
@@ -240,31 +242,40 @@ class TestStatusPausedNodeHints:
         assert '--approve' in captured.out
 
 
-class TestResolveRunContextWorkflowOverride:
-    """Test _resolve_run_context with explicit workflow_id override."""
+def test_resolve_run_context_foreign_run_id_raises(tmp_path: Path) -> None:
+    """CLI-1: passing a run-id that differs from .last_run should raise, not silently use wrong workflow_id."""
+    from cli.commands.status import _resolve_run_context
+    from cli.last_run import LastRunContext, save_last_run
 
-    def test_explicit_workflow_id_and_run_id(self, tmp_path):
-        """Both overrides provided — uses them directly, ignores .last_run."""
-        from cli.commands.status import _resolve_run_context
+    ctx = LastRunContext(
+        workflow_id=UUID('aaaaaaaa-0000-0000-0000-000000000000'),
+        run_id='run-id-for-workflow-a',
+        instance='https://example.com',
+        started_at=datetime.now(UTC),
+    )
+    save_last_run(tmp_path, ctx)
 
-        wf_id, rid = _resolve_run_context(
-            'run-override',
-            tmp_path,
-            workflow_id_override='wf-override',
-        )
-        assert wf_id == 'wf-override'
-        assert rid == 'run-override'
+    with pytest.raises(ValueError, match='--workflow-id'):
+        _resolve_run_context('run-id-for-workflow-b', tmp_path)
 
-    def test_workflow_override_without_run_id_raises(self, tmp_path):
-        """workflow_id override without run_id should raise ValueError."""
-        from cli.commands.status import _resolve_run_context
 
-        with pytest.raises(ValueError, match='--run-id'):
-            _resolve_run_context(
-                None,
-                tmp_path,
-                workflow_id_override='wf-override',
-            )
+def test_resolve_run_context_matching_run_id_succeeds(tmp_path: Path) -> None:
+    """Passing the same run-id that is in .last_run should succeed."""
+    from cli.commands.status import _resolve_run_context
+    from cli.last_run import LastRunContext, save_last_run
+
+    ctx = LastRunContext(
+        workflow_id=UUID('aaaaaaaa-0000-0000-0000-000000000000'),
+        run_id='run-id-for-workflow-a',
+        instance='https://example.com',
+        started_at=datetime.now(UTC),
+    )
+    save_last_run(tmp_path, ctx)
+
+    wf_id, run_id = _resolve_run_context('run-id-for-workflow-a', tmp_path)
+
+    assert wf_id == 'aaaaaaaa-0000-0000-0000-000000000000'
+    assert run_id == 'run-id-for-workflow-a'
 
 
 # ---------------------------------------------------------------------------

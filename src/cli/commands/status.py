@@ -43,23 +43,17 @@ STATUS_STYLES: dict[str, str] = {
 def _resolve_run_context(
     run_id_override: str | None,
     working_dir: Path,
-    *,
-    workflow_id_override: str | None = None,
-    require_explicit: bool = False,
 ) -> tuple[str, str]:
-    """Return (workflow_id, run_id) from overrides, .last_run, or combination.
+    """Return (workflow_id, run_id) from run_id_override and/or .last_run.
 
     Resolution priority:
-    1. Both workflow_id_override and run_id_override -> use both directly.
-    2. workflow_id_override only (no run_id) -> error.
-    3. run_id_override only -> use workflow_id from .last_run + run_id_override.
-    4. Neither override -> use both from .last_run.
+    1. run_id_override matches .last_run run_id -> use both from .last_run (with override).
+    2. run_id_override differs from .last_run run_id -> raise (mismatch guard).
+    3. Neither override -> use both from .last_run.
 
     Args:
         run_id_override: Explicit run ID from --run-id flag, or None.
         working_dir: Directory to look for .last_run file.
-        workflow_id_override: Explicit workflow ID from --workflow-id flag, or None.
-        require_explicit: If True, --run-id is mandatory.
 
     Returns:
         Tuple of (workflow_id, run_id) as strings.
@@ -67,27 +61,19 @@ def _resolve_run_context(
     Raises:
         ValueError: If run context cannot be resolved.
     """
-    # Case 1: Both explicit overrides — skip .last_run entirely
-    if workflow_id_override and run_id_override:
-        return workflow_id_override, run_id_override
-
-    # Case 2: workflow_id override without run_id — error
-    if workflow_id_override and not run_id_override:
-        raise ValueError('--workflow-id requires --run-id.')
-
     last_run = load_last_run(working_dir)
-
-    if require_explicit:
-        if run_id_override is None:
-            raise ValueError('--run-id is required for this command.')
-        if last_run is None:
-            raise ValueError('No .last_run found. Provide --run-id and --workflow-id.')
-        return str(last_run.workflow_id), run_id_override
 
     if last_run is not None:
         wf_id = str(last_run.workflow_id)
-        rid = run_id_override if run_id_override else last_run.run_id
-        return wf_id, rid
+        if run_id_override:
+            if run_id_override == last_run.run_id:
+                return wf_id, run_id_override
+            raise ValueError(
+                f'Run ID {run_id_override!r} is not in the current .last_run context '
+                f'(expected {last_run.run_id!r}). '
+                'Use: workflow status --workflow-id <wf-id> --run-id <run-id>'
+            )
+        return wf_id, last_run.run_id
 
     if run_id_override is not None:
         raise ValueError('--run-id provided but no .last_run found (need --workflow-id).')
@@ -307,9 +293,12 @@ def status_command(
     config.validate_for_api()
     cwd = working_dir or Path.cwd()
 
-    workflow_id, resolved_run_id = _resolve_run_context(
-        run_id, cwd, workflow_id_override=workflow_id_override
-    )
+    if workflow_id_override and run_id:
+        workflow_id, resolved_run_id = workflow_id_override, run_id
+    elif workflow_id_override and not run_id:
+        raise ValueError('--workflow-id requires --run-id.')
+    else:
+        workflow_id, resolved_run_id = _resolve_run_context(run_id, cwd)
 
     with WorkflowClient.from_config(config) as client:
         status_resp = client.get_workflow_status(workflow_id, resolved_run_id)

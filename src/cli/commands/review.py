@@ -89,10 +89,11 @@ def review_command(
     if decision in ('reject', 'revise') and not comment:
         raise ValueError('--comment is required with --reject and --revise.')
 
-    # Resolve run context (require_explicit=True: --run-id is mandatory)
-    workflow_id, resolved_run_id = _resolve_run_context(
-        run_id, cwd, require_explicit=True, workflow_id_override=workflow_id_override
-    )
+    # Resolve run context (--run-id is mandatory for review)
+    if workflow_id_override:
+        workflow_id, resolved_run_id = workflow_id_override, run_id
+    else:
+        workflow_id, resolved_run_id = _resolve_run_context(run_id, cwd)
 
     # Pre-flight validation: confirm the specified node is a paused HUMAN_REVIEW node
     with WorkflowClient.from_config(config) as client:
@@ -128,7 +129,7 @@ def review_command(
                 f'Workflow is paused for input at node {waiting_input_node_id} '
                 f'(type: {input_type}). '
                 f"Use 'workflow input --node-id {waiting_input_node_id} "
-                f"--data '{{...}}'' instead."
+                f"--data '{{...}}' instead."
             )
 
         if node_id not in node_type_map:
