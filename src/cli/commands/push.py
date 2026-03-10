@@ -356,10 +356,6 @@ def build_node_parameters(
         for key in ('model', 'temperature', 'maxTokens'):
             if key in node_config:
                 params[key] = node_config[key]
-        if 'system_prompt' in node_config:
-            params['systemPrompt'] = node_config[
-                'system_prompt'
-            ]  # translate to camelCase for Temporal
         if 'primaryInput' in node_config:
             # Replace slug references with UUID references
             params['primaryInput'] = _replace_slugs_with_uuids(
@@ -544,11 +540,9 @@ def wdf_to_api_payload(
         # Remove fields that belong exclusively in parameters, not config
         runtime_config = {}
         if node_def.type in ('agent',):
-            # Agent nodes: config holds model_name, system_prompt, etc.
+            # Agent nodes: config holds model_name, temperature, etc.
             if 'model' in node_config:
                 runtime_config['model_name'] = node_config['model']
-            if 'system_prompt' in node_config:
-                runtime_config['system_prompt'] = node_config['system_prompt']
             if 'temperature' in node_config:
                 runtime_config['temperature'] = node_config['temperature']
             if 'maxTokens' in node_config:

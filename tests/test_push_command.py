@@ -541,9 +541,9 @@ class TestBuildNodeParameters:
         node_config = {
             'agent_id': str(UUID('22222222-2222-2222-2222-222222222222')),
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
             'temperature': 0.7,
             'maxTokens': 2048,
+            'primaryInput': '{{input.output.text}}',
         }
         node_def = NodeDefinition.model_construct(
             type='agent',
@@ -555,7 +555,8 @@ class TestBuildNodeParameters:
         assert params['type'] == 'agent'
         assert params['agentId'] == node_config['agent_id']
         assert params['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert params['systemPrompt'] == 'You are helpful.'
+        assert 'systemPrompt' not in params
+        assert params['primaryInput'] == '{{input.output.text}}'
 
     def test_common_fields_always_present(self):
         """Test that common UI fields are always present."""
@@ -630,7 +631,6 @@ class TestAgentNodePrimaryInput:
         slug_to_uuid = {'input_node': input_uuid}
         node_config = {
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
             'primaryInput': '{{input_node.output.text}}',
         }
         node_def = NodeDefinition.model_construct(
@@ -647,7 +647,6 @@ class TestAgentNodePrimaryInput:
         """Test that primaryInput key is absent when not set in node config (backward compat)."""
         node_config = {
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
         }
         node_def = NodeDefinition.model_construct(
             type='agent',

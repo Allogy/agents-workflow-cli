@@ -122,7 +122,7 @@ def mock_nodes():
             config={
                 'agent_id': str(AGENT_UUID),
                 'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-                'system_prompt': 'You are an invoice processing agent.',
+                'primaryInput': f'{{{{{INPUT_NODE_ID}.output.text}}}}',
                 'temperature': 0.7,
             },
             delegated_response=False,
@@ -504,7 +504,7 @@ class TestApiResponseToWdf:
         assert 'agent_id' not in agent_node.config
         # Other fields preserved
         assert agent_node.config['model'] == 'anthropic.claude-3-5-sonnet-20241022-v2:0'
-        assert agent_node.config['system_prompt'] == 'You are an invoice processing agent.'
+        assert agent_node.config['primaryInput'] == '{{user-input.output.text}}'
 
     def test_edges_mapped_to_slugs(self, mock_workflow, mock_metadata, mock_nodes, mock_edges):
         """Edge source/target UUIDs are converted to slugs."""
@@ -1280,7 +1280,7 @@ class TestExtractNodeConfig:
             'label': 'My Agent',
             'agentId': agent_id,
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are a helpful assistant.',
+            'primaryInput': '{{input.output.text}}',
             'temperature': 0.7,
             'maxTokens': 2048,
             'function_name': 'agent_1',
@@ -1290,7 +1290,7 @@ class TestExtractNodeConfig:
         result = extract_node_config('AGENT', parameters, config)
         assert result['agentId'] == agent_id
         assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert result['system_prompt'] == 'You are a helpful assistant.'
+        assert result['primaryInput'] == '{{input.output.text}}'
         assert result['temperature'] == 0.7
         assert result['maxTokens'] == 2048
 
@@ -1300,12 +1300,12 @@ class TestExtractNodeConfig:
         config = {
             'agent_id': str(uuid4()),
             'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-            'system_prompt': 'You are an invoice agent.',
+            'primaryInput': '{{input.output.text}}',
             'temperature': 0.7,
         }
         result = extract_node_config('AGENT', parameters, config)
         assert result['model'] == 'anthropic.claude-3-5-sonnet-20241022-v2:0'
-        assert result['system_prompt'] == 'You are an invoice agent.'
+        assert result['primaryInput'] == '{{input.output.text}}'
         assert result['temperature'] == 0.7
         # agent_id -> agentId renaming via config fallback
         assert result['agentId'] == config['agent_id']
@@ -1315,7 +1315,7 @@ class TestExtractNodeConfig:
         parameters: dict = {}
         config = {
             'model_name': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
             'max_tokens': 2048,
         }
         result = extract_node_config('AGENT', parameters, config)
@@ -1386,13 +1386,17 @@ class TestExtractNodeConfig:
     def test_parameters_primary_over_config(self):
         """Test that parameters values take priority over config values."""
         parameters = {'model': 'params-model', 'temperature': 0.9}
-        config = {'model': 'config-model', 'temperature': 0.5, 'system_prompt': 'from config'}
+        config = {
+            'model': 'config-model',
+            'temperature': 0.5,
+            'primaryInput': '{{input.output.text}}',
+        }
         result = extract_node_config('AGENT', parameters, config)
         # parameters should win
         assert result['model'] == 'params-model'
         assert result['temperature'] == 0.9
         # config should fill gaps
-        assert result['system_prompt'] == 'from config'
+        assert result['primaryInput'] == '{{input.output.text}}'
 
     def test_unknown_node_type_falls_back_to_config(self):
         """Test that unknown node types use raw config as fallback."""
@@ -1860,13 +1864,13 @@ class TestExtractNodeConfigEmptyDependencies:
             'type': 'agent',
             'agentId': None,
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
         }
         result = extract_node_config('AGENT', parameters, {})
         assert 'agentId' not in result
         # Non-dependency fields should still be extracted
         assert result['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert result['system_prompt'] == 'You are helpful.'
+        assert result['primaryInput'] == '{{input.output.text}}'
 
     def test_agent_node_skips_empty_string_agent_id(self):
         """AGENT node with agentId='' should not include agentId in result."""
@@ -1874,7 +1878,7 @@ class TestExtractNodeConfigEmptyDependencies:
             'type': 'agent',
             'agentId': '',
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
         }
         result = extract_node_config('AGENT', parameters, {})
         assert 'agentId' not in result
@@ -1970,7 +1974,7 @@ class TestExtractNodeConfigEmptyDependencies:
         config = {
             'agent_id': None,
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
         }
         result = extract_node_config('AGENT', parameters, config)
         assert 'agentId' not in result
@@ -1982,7 +1986,7 @@ class TestExtractNodeConfigEmptyDependencies:
         config = {
             'agent_id': '',
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
         }
         result = extract_node_config('AGENT', parameters, config)
         assert 'agentId' not in result
@@ -1996,7 +2000,7 @@ class TestExtractNodeConfigEmptyDependencies:
             'type': 'agent',
             'agentId': agent_id,
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
         }
         result = extract_node_config('AGENT', parameters, {})
         assert result['agentId'] == agent_id
@@ -2020,7 +2024,7 @@ class TestExtractNodeConfigEmptyDependencies:
             'type': 'agent',
             'agentId': str(uuid4()),
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-            'system_prompt': 'You are helpful.',
+            'primaryInput': '{{input.output.text}}',
             'temperature': None,
             'maxTokens': None,
         }

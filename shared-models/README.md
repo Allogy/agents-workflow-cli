@@ -140,8 +140,7 @@ workflow = WorkflowDefinition(
             label='Assistant',
             execution_mode='MESSAGES',
             config=AgentConfig(
-                model='anthropic.claude-sonnet',
-                system_prompt='You are a helpful assistant.',
+                primaryInput='{{user-input.output.text}}',
             ),
         ),
     },

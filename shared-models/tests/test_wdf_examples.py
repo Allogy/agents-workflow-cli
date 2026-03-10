@@ -138,7 +138,7 @@ class TestAgentReviewExample:
         assert set(wf.nodes.keys()) == {'user_input', 'agent', 'review', 'output'}
 
     def test_agent_config_aligned(self):
-        """Agent config should have model and system_prompt."""
+        """Agent config should have agent_name and primaryInput."""
         path = EXAMPLES_DIR / 'agent-review.workflow.yaml'
         data = yaml.safe_load(path.read_text())
         wf = WorkflowDefinition.model_validate(data)
@@ -147,8 +147,7 @@ class TestAgentReviewExample:
         from workflow_models.wdf.nodes import AgentConfig
 
         assert isinstance(agent.parsed_config, AgentConfig)
-        assert agent.parsed_config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert 'helpful assistant' in agent.parsed_config.system_prompt
+        assert agent.parsed_config.primaryInput == '{{user_input.output.text}}'
 
 
 class TestRetrievalPipelineExample:

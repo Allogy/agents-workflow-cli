@@ -89,8 +89,7 @@ workflow pull "Invoice"
 {
   "config": {
     "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "system_prompt": "You are a helpful assistant"
+    "primaryInput": "{{<uuid>.output.text}}"
   }
 }
 ```
@@ -103,8 +102,7 @@ nodes:
     execution_mode: MESSAGES
     config:
       agent_name: Customer Support Agent
-      model: anthropic.claude-3-5-sonnet-20241022-v2:0
-      system_prompt: You are a helpful assistant
+      primaryInput: "{{user_input.output.text}}"
 ```
 
 ### Knowledge Base UUIDs → Names

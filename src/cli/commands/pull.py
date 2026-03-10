@@ -163,7 +163,7 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     'AGENT': {
         'agentId': None,
         'model': None,
-        'system_prompt': None,
+        'primaryInput': None,
         'temperature': None,
         'maxTokens': None,
     },
@@ -211,7 +211,7 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
     'AGENT': {
         'model': None,
         'model_name': 'model',
-        'system_prompt': None,
+        'primaryInput': None,
         'temperature': None,
         'max_tokens': 'maxTokens',
         'maxTokens': None,

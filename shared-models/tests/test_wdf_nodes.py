@@ -135,55 +135,46 @@ class TestFileUploadConfig:
 
 
 class TestAgentConfig:
-    """AGENT: model, system_prompt (required); temperature, maxTokens, tools, agentId (optional)."""
+    """AGENT: all fields optional; temperature, maxTokens, tools, agentId, primaryInput."""
 
     def test_valid_minimal(self):
-        config = AgentConfig(
-            model='us.anthropic.claude-sonnet-4-20250514-v1:0',
-            system_prompt='You are a helpful assistant.',
-        )
-        assert config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-        assert config.system_prompt == 'You are a helpful assistant.'
+        config = AgentConfig()
+        assert config.model is None
         assert config.temperature is None
         assert config.maxTokens is None
         assert config.tools is None
         assert config.agentId is None
+        assert config.primaryInput is None
 
     def test_valid_full_config(self):
         config = AgentConfig(
             model='us.anthropic.claude-sonnet-4-20250514-v1:0',
-            system_prompt='You are a helpful assistant.',
             temperature=0.7,
             maxTokens=2048,
             tools=[],
             agentId='general-agent',
+            primaryInput='{{input.output.text}}',
         )
+        assert config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
         assert config.temperature == 0.7
         assert config.maxTokens == 2048
         assert config.tools == []
         assert config.agentId == 'general-agent'
-
-    def test_missing_model_raises(self):
-        with pytest.raises(ValidationError):
-            AgentConfig(system_prompt='test')  # type: ignore[call-arg]
-
-    def test_missing_system_prompt_raises(self):
-        with pytest.raises(ValidationError):
-            AgentConfig(model='test')  # type: ignore[call-arg]
+        assert config.primaryInput == '{{input.output.text}}'
 
     def test_temperature_range(self):
         """Temperature should be between 0 and 2."""
-        config = AgentConfig(model='test', system_prompt='test', temperature=0.0)
+        config = AgentConfig(model='test', temperature=0.0)
         assert config.temperature == 0.0
 
-        config = AgentConfig(model='test', system_prompt='test', temperature=2.0)
+        config = AgentConfig(model='test', temperature=2.0)
         assert config.temperature == 2.0
 
         with pytest.raises(ValidationError):
-            AgentConfig(model='test', system_prompt='test', temperature=-0.1)
+            AgentConfig(model='test', temperature=-0.1)
 
         with pytest.raises(ValidationError):
-            AgentConfig(model='test', system_prompt='test', temperature=2.1)
+            AgentConfig(model='test', temperature=2.1)
 
 
 # ============================================
@@ -565,14 +556,13 @@ class TestNodeDefinition:
             execution_mode='MESSAGES',
             label='Research Agent',
             config={
-                'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-                'system_prompt': 'You are a helpful assistant.',
+                'primaryInput': '{{input.output.text}}',
             },
         )
         assert node.type == 'agent'
         assert node.execution_mode == 'MESSAGES'
         assert isinstance(node.parsed_config, AgentConfig)
-        assert node.parsed_config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert node.parsed_config.primaryInput == '{{input.output.text}}'
 
     def test_llm_call_node(self):
         node = NodeDefinition(
@@ -652,7 +642,7 @@ class TestNodeDefinition:
             (
                 'agent',
                 'MESSAGES',
-                {'model': 'test', 'system_prompt': 'test'},
+                {},
             ),
             (
                 'rag_agent',

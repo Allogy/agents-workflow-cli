@@ -97,8 +97,7 @@ nodes:
     label: My Agent
     config:
       agent_name: Customer Support Agent  # Human-friendly name
-      model: anthropic.claude-3-5-sonnet-20241022-v2:0
-      system_prompt: You are a helpful assistant
+      primaryInput: "{{input.output.text}}"
 ```
 
 **After resolution (in API payload):**
@@ -106,8 +105,7 @@ nodes:
 {
   "config": {
     "agentId": "a1b2c3d4-...",  // Resolved UUID
-    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "system_prompt": "You are a helpful assistant"
+    "primaryInput": "{{<uuid>.output.text}}"
   }
 }
 ```
@@ -294,8 +292,7 @@ nodes:
     execution_mode: MESSAGES
     config:
       agent_name: Customer Support Agent  # Resolved automatically
-      model: anthropic.claude-3-5-sonnet-20241022-v2:0
-      system_prompt: You are a helpful customer support agent
+      primaryInput: "{{input.output.text}}"
 edges:
   - from: input
     to: agent

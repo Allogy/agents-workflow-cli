@@ -76,15 +76,16 @@ class FileUploadConfig(BaseModel):
 class AgentConfig(BaseModel):
     """Config for AGENT nodes.
 
-    Hybrid of backend ``config`` (runtime: model_name, system_prompt,
-    temperature, max_tokens, tools) and ``parameters`` (agentId for
-    linking to a registered agent). For WDF we use the user-facing
-    field names: ``model`` instead of ``model_name``, ``maxTokens``
-    instead of ``max_tokens``.
+    Agent nodes delegate to a registered agent entity (referenced by
+    ``agent_name`` or ``agentId``).  The agent carries its own system
+    prompt, so the WDF config only needs routing (``primaryInput``) and
+    optional runtime overrides (model, temperature, etc.).
+
+    For WDF we use the user-facing field names: ``model`` instead of
+    ``model_name``, ``maxTokens`` instead of ``max_tokens``.
     """
 
-    model: str
-    system_prompt: str
+    model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     maxTokens: int | None = Field(default=None, gt=0)
     tools: list[Any] | None = None

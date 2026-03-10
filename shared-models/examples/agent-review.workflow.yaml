@@ -23,11 +23,8 @@ nodes:
     execution_mode: MESSAGES
     label: General Agent
     config:
-      model: us.anthropic.claude-sonnet-4-20250514-v1:0
-      system_prompt: You are a helpful assistant. Process the user's request and provide a detailed response.
-      temperature: 0.7
-      maxTokens: 2048
-      tools: []
+      agent_name: YOUR_AGENT_NAME
+      primaryInput: "{{user_input.output.text}}"
 
   review:
     type: human_review

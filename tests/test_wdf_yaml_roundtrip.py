@@ -37,8 +37,7 @@ nodes:
     execution_mode: MESSAGES
     label: Answer Agent
     config:
-      model: us.anthropic.claude-sonnet-4-20250514-v1:0
-      system_prompt: You are a helpful Q&A assistant.
+      primaryInput: "{{question.output.text}}"
 edges:
   - from: question
     to: answer
@@ -134,7 +133,7 @@ class TestDumpWorkflowYaml:
                 'end': {
                     'type': 'agent',
                     'execution_mode': 'MESSAGES',
-                    'config': {'model': 'test', 'system_prompt': 'test'},
+                    'config': {},
                 },
             },
             edges=[{'from': 'start', 'to': 'end'}],
@@ -162,7 +161,7 @@ class TestDumpWorkflowYaml:
                 'b': {
                     'type': 'agent',
                     'execution_mode': 'MESSAGES',
-                    'config': {'model': 'test', 'system_prompt': 'test'},
+                    'config': {},
                 },
             },
             edges=[{'from': 'a', 'to': 'b'}],
@@ -280,14 +279,12 @@ nodes:
     type: agent
     execution_mode: MESSAGES
     config:
-      model: test
-      system_prompt: Handle yes
+      primaryInput: "{{input.output.text}}"
   no_path:
     type: agent
     execution_mode: MESSAGES
     config:
-      model: test
-      system_prompt: Handle no
+      primaryInput: "{{input.output.text}}"
 edges:
   - from: input
     to: yes_path

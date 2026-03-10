@@ -130,7 +130,7 @@ def test_cli_can_validate_workflow_data():
         config_type=NodeConfigType.AGENT,
         execution_mode=ExecutionMode.INPUT,
         parameters={'model': 'claude-sonnet'},
-        config={'system_prompt': 'You are a helpful assistant'},
+        config={'primaryInput': '{{input.output.text}}'},
     )
     assert node.config_type == NodeConfigType.AGENT
 

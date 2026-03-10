@@ -22,13 +22,7 @@ nodes:
     execution_mode: MESSAGES
     label: Assistant Agent
     config:
-      model: us.anthropic.claude-sonnet-4-20250514-v1:0
-      system_prompt: >
-        You are a helpful assistant. Respond to the user's message
-        clearly and concisely.
-      temperature: 0.7
-      maxTokens: 2048
-      tools: []
+      agent_name: YOUR_AGENT_NAME
       primaryInput: "{{user_input.output.text}}"
 
 edges:

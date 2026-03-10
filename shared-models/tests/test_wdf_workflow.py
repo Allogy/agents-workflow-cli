@@ -104,7 +104,7 @@ class TestWorkflowDefinition:
                     'type': 'agent',
                     'execution_mode': 'MESSAGES',
                     'label': 'Process',
-                    'config': {'model': 'test', 'system_prompt': 'test'},
+                    'config': {},
                 },
             },
             edges=[
@@ -318,7 +318,7 @@ class TestWorkflowDefinition:
                 'b': {
                     'type': 'agent',
                     'execution_mode': 'MESSAGES',
-                    'config': {'model': 'test', 'system_prompt': 'test'},
+                    'config': {},
                 },
             },
             edges=[{'from': 'a', 'to': 'b'}],
