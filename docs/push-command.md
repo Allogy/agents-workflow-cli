@@ -173,6 +173,72 @@ nodes:
 
 Each entry in the list is resolved independently using the same 3-tier strategy. You can also mix names and UUIDs within the list.
 
+### Variable References in Templates
+
+Variable references use the format `{{slug.output.field}}` to access outputs from upstream nodes. The `.output.` delimiter and a **specific field path** are required — using just `{{slug.output}}` without a field will fail at runtime.
+
+#### Structured Input Nodes (`structured_input`)
+
+Structured input data is stored with each form field accessible at `{{slug.output.field_name}}`:
+
+```yaml
+nodes:
+  form:
+    type: structured_input
+    execution_mode: INPUT
+    config:
+      schema:
+        type: object
+        properties:
+          name: { type: string }
+          topic: { type: string }
+
+  process:
+    type: llm_call
+    execution_mode: MESSAGES
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      # Correct: reference specific fields
+      template: "Name: {{form.output.name}}\nTopic: {{form.output.topic}}"
+      # WRONG: {{form.output}} — will fail with "Invalid reference format"
+```
+
+#### Retrieve / Vector Search Nodes (`retrieve`)
+
+Retrieve node results are accessible at `{{slug.output.results}}` (array of documents):
+
+```yaml
+nodes:
+  search:
+    type: retrieve
+    execution_mode: FLOW
+    config:
+      knowledge_base_name: my_kb
+      topK: 5
+      searchQuery: "{{form.output.topic}}"
+
+  summarize:
+    type: llm_call
+    execution_mode: MESSAGES
+    config:
+      model: us.anthropic.claude-sonnet-4-20250514-v1:0
+      # Correct: reference the results array
+      template: "Context: {{search.output.results}}\n\nSummarize the above."
+      # WRONG: {{search.output}} — will fail with "Invalid reference format"
+```
+
+#### Common Output Fields by Node Type
+
+| Node Type | Primary Output Path | Description |
+|-----------|-------------------|-------------|
+| `structured_input` | `{{slug.output.field_name}}` | Individual form fields |
+| `plain_txt_input` | `{{slug.output.text}}` | Text content |
+| `llm_call` | `{{slug.output.text}}` | Generated text |
+| `agent` | `{{slug.output.response}}` | Agent response text |
+| `retrieve` | `{{slug.output.results}}` | Retrieved documents array |
+| `structured_output` | `{{slug.output.structured}}` | Structured JSON output |
+| `file_upload` | `{{slug.output.text}}` | Extracted text from files |
+
 ### Resolution Errors
 
 If an agent or knowledge base cannot be found, the push fails with a helpful error listing available alternatives:

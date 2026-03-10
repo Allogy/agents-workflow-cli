@@ -144,6 +144,8 @@ Invalid variable references to non-existent nodes: nonexistent_slug
 
 **Fix:** Ensure `{{slug.output.field}}` references use valid node slugs defined in `nodes`
 
+> **Important:** Variable references require a specific field path after `.output.` — using `{{slug.output}}` without a field name will pass validation (the validator only checks node existence) but will **fail at runtime** with `"Invalid reference format (missing .output.)"`. Always use the full path: `{{slug.output.field_name}}`. See [push-command.md](./push-command.md#variable-references-in-templates) for the correct output paths per node type.
+
 ### 6. Missing Required Config Field
 
 **Error:**
