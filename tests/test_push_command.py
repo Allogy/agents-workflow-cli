@@ -621,6 +621,55 @@ class TestBuildNodeParameters:
         params = build_node_parameters(node_def, 'search', node_config, {})
         assert params['searchQuery'] == 'static query text'
 
+    def test_structured_output_with_extraction_prompt(self):
+        """Test that extractionPrompt is written to parameters for structured_output."""
+        node_config = {
+            'schema': {'type': 'object', 'properties': {}},
+            'extractionPrompt': 'Extract the key findings from the analysis.',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='structured_output',
+            execution_mode='OUTPUT',
+            label='Results',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'results', node_config, {})
+        assert params['type'] == 'structuredOutput'
+        assert params['extractionPrompt'] == 'Extract the key findings from the analysis.'
+
+    def test_structured_output_with_primary_input(self):
+        """Test that primaryInput slug references are replaced with UUIDs for structured_output."""
+        input_uuid = UUID('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+        slug_to_uuid = {'form_input': input_uuid}
+        node_config = {
+            'schema': {'type': 'object', 'properties': {}},
+            'primaryInput': '{{form_input.output.data}}',
+        }
+        node_def = NodeDefinition.model_construct(
+            type='structured_output',
+            execution_mode='OUTPUT',
+            label='Results',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'results', node_config, slug_to_uuid)
+        assert params['primaryInput'] == f'{{{{{input_uuid}.output.data}}}}'
+
+    def test_structured_output_without_new_fields(self):
+        """Test that structured_output without extractionPrompt/primaryInput still works."""
+        node_config = {
+            'schema': {'type': 'object', 'properties': {}},
+        }
+        node_def = NodeDefinition.model_construct(
+            type='structured_output',
+            execution_mode='OUTPUT',
+            label='Results',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'results', node_config, {})
+        assert params['type'] == 'structuredOutput'
+        assert 'extractionPrompt' not in params
+        assert 'primaryInput' not in params
+
 
 class TestAgentNodePrimaryInput:
     """Test primaryInput handling for agent-type nodes."""

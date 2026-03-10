@@ -193,6 +193,8 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     },
     'STRUCTURED_OUTPUT': {
         # schema lives in config, not parameters
+        'extractionPrompt': None,
+        'primaryInput': None,
     },
     'HUMAN_REVIEW': {
         'review_prompt': None,

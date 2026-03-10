@@ -375,6 +375,40 @@ class TestStructuredOutputConfig:
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
         assert config.schema_['type'] == 'object'
 
+    def test_with_extraction_prompt(self):
+        """extractionPrompt is accepted as optional field."""
+        config = StructuredOutputConfig(extractionPrompt='Extract the key findings.')
+        assert config.extractionPrompt == 'Extract the key findings.'
+        assert config.primaryInput is None
+
+    def test_with_primary_input(self):
+        """primaryInput is accepted as optional field."""
+        config = StructuredOutputConfig(primaryInput='{{form.output.text}}')
+        assert config.primaryInput == '{{form.output.text}}'
+        assert config.extractionPrompt is None
+
+    def test_full_config(self):
+        """All fields together."""
+        config = StructuredOutputConfig(
+            model='anthropic.claude-sonnet-4-5-v2',
+            schema={
+                'type': 'object',
+                'properties': {'result': {'type': 'string'}},
+            },
+            extractionPrompt='Extract the result.',
+            primaryInput='{{input.output.data}}',
+        )
+        assert config.model == 'anthropic.claude-sonnet-4-5-v2'
+        assert config.schema_['type'] == 'object'
+        assert config.extractionPrompt == 'Extract the result.'
+        assert config.primaryInput == '{{input.output.data}}'
+
+    def test_defaults_are_none(self):
+        """New fields default to None."""
+        config = StructuredOutputConfig()
+        assert config.extractionPrompt is None
+        assert config.primaryInput is None
+
 
 # ============================================
 # RETRIEVE Config

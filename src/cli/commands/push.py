@@ -419,7 +419,12 @@ def build_node_parameters(
 
     elif node_type == 'structured_output':
         # schema stays in config, not parameters
-        pass
+        if 'extractionPrompt' in node_config:
+            params['extractionPrompt'] = node_config['extractionPrompt']
+        if 'primaryInput' in node_config:
+            params['primaryInput'] = _replace_slugs_with_uuids(
+                node_config['primaryInput'], slug_to_uuid
+            )
 
     elif node_type == 'structured_input':
         # schema stays in config, not parameters

@@ -153,10 +153,16 @@ class StructuredOutputConfig(BaseModel):
 
     Backend ``config`` uses ``schema`` (JSON Schema). Also supports
     ``model`` for LLM-based output generation.
+
+    Additional fields stored in backend ``parameters``:
+    - ``extractionPrompt``: guides the LLM during structured output extraction.
+    - ``primaryInput``: provides context or a variable reference for the node.
     """
 
     schema_: dict[str, Any] | None = Field(default=None, alias='schema')
     model: str | None = None
+    extractionPrompt: str | None = None
+    primaryInput: str | None = None
 
     model_config = {'populate_by_name': True}
 

@@ -1336,6 +1336,50 @@ class TestExtractNodeConfig:
         result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
         assert result['schema'] == config['schema']
 
+    def test_structured_output_with_extraction_prompt(self):
+        """Test extracting extractionPrompt from parameters for STRUCTURED_OUTPUT."""
+        parameters = {
+            'type': 'structuredOutput',
+            'label': 'Results',
+            'function_name': 'results',
+            'extractionPrompt': 'Extract the key findings.',
+        }
+        config = {'schema': {'type': 'object', 'properties': {}}}
+        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
+        assert result['extractionPrompt'] == 'Extract the key findings.'
+        assert result['schema'] == config['schema']
+
+    def test_structured_output_with_primary_input(self):
+        """Test extracting primaryInput from parameters for STRUCTURED_OUTPUT."""
+        parameters = {
+            'type': 'structuredOutput',
+            'label': 'Results',
+            'function_name': 'results',
+            'primaryInput': '{{form_input.output.data}}',
+        }
+        config = {'schema': {'type': 'object', 'properties': {}}}
+        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
+        assert result['primaryInput'] == '{{form_input.output.data}}'
+
+    def test_structured_output_with_all_new_fields(self):
+        """Test extracting both extractionPrompt and primaryInput for STRUCTURED_OUTPUT."""
+        parameters = {
+            'type': 'structuredOutput',
+            'label': 'Results',
+            'function_name': 'results',
+            'extractionPrompt': 'Extract findings.',
+            'primaryInput': 'Context for this output node.',
+        }
+        config = {
+            'schema': {'type': 'object', 'properties': {'title': {'type': 'string'}}},
+            'model': 'anthropic.claude-sonnet-4-5-v2',
+        }
+        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
+        assert result['extractionPrompt'] == 'Extract findings.'
+        assert result['primaryInput'] == 'Context for this output node.'
+        assert result['schema'] == config['schema']
+        assert result['model'] == 'anthropic.claude-sonnet-4-5-v2'
+
     def test_retrieve_from_parameters(self):
         """Test extracting RETRIEVE config from parameters."""
         kb_id = str(uuid4())
