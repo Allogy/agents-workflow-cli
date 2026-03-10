@@ -905,7 +905,12 @@ def _run_interactive(
         if event_upper == 'WAITING_FOR_INPUT':
             # Get the paused node info from status API
             status_resp = _poll_with_retry(client, workflow_id, run_id, output_console=out)
-            node_id = status_resp.state.get('waiting_input_node_id', '')
+            _state = status_resp.state or {}
+            node_id = (
+                _state.get('waiting_for_input_node_id')
+                or _state.get('waiting_input_node_id')
+                or _state.get('current_node_id', '')
+            )
             node_slug, step_type = node_id_to_info.get(node_id, (node_id, ''))
 
             if step_type == 'FILE_UPLOAD':
