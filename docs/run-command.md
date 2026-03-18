@@ -127,6 +127,33 @@ instance: https://stage.sb.allogy.com
 started_at: '2026-02-25T10:30:00+00:00'
 ```
 
+## Node Outputs
+
+When a workflow completes successfully, the CLI automatically fetches and displays
+all node outputs. This shows the data produced by each node during execution:
+
+```
+Node Outputs
+  upload-invoice:
+    {
+      "files": ["invoice.pdf"]
+    }
+  extract-data:
+    {
+      "vendor": "Acme Corp",
+      "total": 1250.00
+    }
+```
+
+Node outputs are displayed using node slugs when available, falling back to
+truncated UUIDs. This feature works in both streaming and polling modes.
+
+To view node outputs for a previously completed run, use:
+
+```bash
+workflow status --show-outputs
+```
+
 ## Exit Codes
 
 | Code | Meaning |

@@ -189,6 +189,9 @@ uv run workflow run "Invoice Processing" --stream --interactive
 # Check execution status
 uv run workflow status
 
+# Check status with node output data
+uv run workflow status --show-outputs
+
 # Submit input to a paused INPUT node
 uv run workflow input --node-id <id> --data '{"text": "Hello"}'
 
