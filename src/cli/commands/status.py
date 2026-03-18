@@ -211,6 +211,43 @@ def _format_status_table(
     out.print(table)
 
 
+def _print_node_outputs(
+    status_resp: WorkflowStatusResponse,
+    nodes: list[Any],
+    output_console: Console | None = None,
+) -> None:
+    """Print node outputs when --show-outputs is enabled.
+
+    Args:
+        status_resp: Workflow status response from the API.
+        nodes: List of LogicalNodePublic from list_nodes().
+        output_console: Optional Rich Console override.
+    """
+    out = output_console or get_console()
+    node_outputs: dict[str, Any] = status_resp.state.get('node_outputs', {})
+
+    if not node_outputs:
+        out.print()
+        out.print('[dim]No node outputs available.[/dim]')
+        return
+
+    # Build node_id -> slug map for display names
+    node_names: dict[str, str] = {}
+    for node in nodes:
+        nid = str(node.id)
+        slug = getattr(node, 'slug', None)
+        node_names[nid] = slug or _format_node_id(nid)
+
+    out.print()
+    out.print('[bold]Node Outputs[/bold]')
+    for node_id, output in node_outputs.items():
+        display = node_names.get(node_id, _format_node_id(node_id))
+        out.print(f'  [cyan]{display}[/cyan]:')
+        formatted = json.dumps(output, indent=2, default=str)
+        for line in formatted.split('\n'):
+            out.print(f'    {line}')
+
+
 def _print_hints(
     status_resp: WorkflowStatusResponse,
     nodes: list[Any],
@@ -275,6 +312,7 @@ def status_command(
     json_output: bool = False,
     working_dir: Path | None = None,
     workflow_id_override: str | None = None,
+    show_outputs: bool = False,
 ) -> None:
     """Check workflow execution status with node-by-node detail.
 
@@ -311,3 +349,5 @@ def status_command(
     out = get_console()
     _format_status_table(status_resp, nodes, output_console=out)
     _print_hints(status_resp, nodes, output_console=out)
+    if show_outputs:
+        _print_node_outputs(status_resp, nodes, output_console=out)

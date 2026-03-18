@@ -489,6 +489,13 @@ def status(
             help='Workflow UUID (overrides .last_run). Requires --run-id.',
         ),
     ] = None,
+    show_outputs: Annotated[
+        bool,
+        typer.Option(
+            '--show-outputs',
+            help='Display node output data after the status table.',
+        ),
+    ] = False,
 ) -> None:
     """Check workflow execution status with node-by-node detail.
 
@@ -499,16 +506,25 @@ def status(
     Uses .workflow.last_run context by default. Pass a run ID as
     argument to override, or use --json for machine-readable output.
 
+    Use --show-outputs to display node output data after the status table.
+
     Exit codes: 0 = success, 1 = runtime error, 2 = user error
 
     Examples:
         workflow status
         workflow status a1b2c3d4-e5f6-7890-abcd-ef1234567890
         workflow status --json
+        workflow status --show-outputs
     """
     config = get_config()
     try:
-        status_command(config, run_id, json_output=json_output, workflow_id_override=workflow_id)
+        status_command(
+            config,
+            run_id,
+            json_output=json_output,
+            workflow_id_override=workflow_id,
+            show_outputs=show_outputs,
+        )
     except (ValueError, FileNotFoundError) as e:
         get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e

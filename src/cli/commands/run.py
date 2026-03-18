@@ -40,7 +40,7 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
-from cli.client import WorkflowClient
+from cli.client import WorkflowClient, WorkflowStatusResponse
 from cli.config import CLIConfig, get_run_timeout
 from cli.console import get_console
 from cli.last_run import LastRunContext, save_last_run
@@ -1095,6 +1095,7 @@ def run_command(
         output_console.print(f'[bold cyan]Running workflow:[/bold cyan] {workflow_id}')
 
         # Fetch node count for progress display
+        nodes: list[Any] = []
         try:
             nodes = client.list_nodes(workflow_id)
             total_nodes = len(nodes)
@@ -1207,6 +1208,14 @@ def run_command(
                 pending_input=inputs if inputs else None,
             )
 
+        # Fetch and display node outputs for completed runs
+        if final_status.upper() in ('COMPLETED', 'RUN_FINISHED'):
+            try:
+                final_resp = client.get_workflow_status(workflow_id, run_id)
+                _print_run_node_outputs(final_resp, nodes or None, output_console)
+            except Exception:
+                pass  # Non-critical: don't fail the run for output display errors
+
         # Handle final status
         _print_final_status(final_status, run_id, output_console=output_console)
 
@@ -1246,3 +1255,38 @@ def _print_final_status(
         out.print(f"   Use: [cyan]workflow input {run_id} --data '{{...}}'[/cyan]")
     else:
         out.print(f'[dim]Final status: {status}[/dim]')
+
+
+def _print_run_node_outputs(
+    status_resp: WorkflowStatusResponse,
+    nodes: list[Any] | None = None,
+    output_console: Console | None = None,
+) -> None:
+    """Print node outputs from a completed run's final status.
+
+    Args:
+        status_resp: Workflow status response with state containing node_outputs.
+        nodes: Optional list of LogicalNodePublic for slug-based display names.
+        output_console: Optional Rich Console override.
+    """
+    out = output_console or get_console()
+    node_outputs: dict[str, Any] = status_resp.state.get('node_outputs', {})
+    if not node_outputs:
+        return
+
+    # Build node_id -> display name map
+    node_names: dict[str, str] = {}
+    if nodes:
+        for node in nodes:
+            nid = str(node.id)
+            slug = getattr(node, 'slug', None)
+            node_names[nid] = slug or (nid[:8] + '...' if len(nid) > 8 else nid)
+
+    out.print()
+    out.print('[bold]Node Outputs[/bold]')
+    for node_id, output in node_outputs.items():
+        display = node_names.get(node_id, node_id[:8] + '...' if len(node_id) > 8 else node_id)
+        out.print(f'  [cyan]{display}[/cyan]:')
+        formatted = _json.dumps(output, indent=2, default=str)
+        for line in formatted.split('\n'):
+            out.print(f'    {line}')
