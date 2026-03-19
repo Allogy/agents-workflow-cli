@@ -28,6 +28,12 @@ from uuid import UUID
 
 from rich.console import Console
 from rich.prompt import Prompt
+from workflow_models import (
+    LogicalEdgePublic,
+    LogicalNodePublic,
+    WorkflowMetadataPublic,
+    WorkflowPublic,
+)
 from workflow_models.wdf import EdgeDefinition, NodeDefinition, WorkflowDefinition
 
 from cli.client import WorkflowClient
@@ -926,13 +932,16 @@ def pull_workflow(
                 raise
             console.print(f'[dim]Found workflow: {workflow_id}[/dim]')
 
-        # Step 2: Fetch all workflow data
+        # Step 2: Fetch all workflow data (single composite call)
         console.print('[dim]Fetching workflow data...[/dim]', end=' ')
         try:
-            workflow = client.get_workflow(workflow_id)
-            metadata = client.get_metadata(workflow_id)
-            nodes = client.list_nodes(workflow_id)
-            edges = client.list_edges(workflow_id)
+            composite = client.get_composite_workflow(workflow_id)
+            workflow = WorkflowPublic.model_validate(composite['workflow'])
+            metadata = WorkflowMetadataPublic.model_validate(
+                composite['workflow'].get('metadata') or {}
+            )
+            nodes = [LogicalNodePublic.model_validate(n) for n in composite.get('nodes', [])]
+            edges = [LogicalEdgePublic.model_validate(e) for e in composite.get('edges', [])]
         except Exception as e:
             console.print('[bold red]failed[/bold red]')
             raise PullError(f'Failed to fetch workflow data: {e}') from e

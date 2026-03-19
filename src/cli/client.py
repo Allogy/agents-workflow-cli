@@ -370,6 +370,36 @@ class WorkflowClient:
         return SaveCompleteWorkflowResponse.model_validate(response.json())
 
     # ==================================================================
+    # V1 Composite Read (GET /v1/workflows/{id}/composite)
+    # ==================================================================
+
+    def get_composite_workflow(
+        self,
+        workflow_id: str | UUID,
+        include: str = 'nodes,edges,visuals',
+    ) -> dict[str, Any]:
+        """Fetch a complete workflow in a single request.
+
+        Returns workflow + metadata + nodes + edges + visuals using eager
+        loading on the server side. Replaces 4-5 separate API calls.
+
+        Args:
+            workflow_id: UUID of the workflow.
+            include: Comma-separated list of includes (nodes, edges, visuals).
+
+        Returns:
+            Raw composite response dict with 'workflow', 'nodes', 'edges' keys.
+
+        Raises:
+            NotFoundError: If the workflow does not exist.
+        """
+        response = self._get(
+            f'/v1/workflows/{workflow_id}/composite',
+            params={'include': include},
+        )
+        return response.json()
+
+    # ==================================================================
     # Dependency Resolution
     # ==================================================================
 

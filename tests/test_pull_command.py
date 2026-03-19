@@ -202,6 +202,88 @@ def mock_knowledge_bases():
     ]
 
 
+def _build_composite_response(workflow, metadata, nodes, edges):
+    """Build a composite API response dict from SimpleNamespace mock objects.
+
+    Mirrors the structure returned by GET /v1/workflows/{id}/composite.
+    """
+    wf_dict = {
+        'id': str(workflow.id),
+        'version': workflow.version,
+        'entry_point': str(workflow.entry_point) if workflow.entry_point else None,
+        'exit_point': str(workflow.exit_point) if workflow.exit_point else None,
+        'state_schema': workflow.state_schema,
+        'execution_config': workflow.execution_config,
+        'organization_id': str(workflow.organization_id),
+        'created_by': str(workflow.created_by),
+        'created_at': workflow.created_at.isoformat(),
+        'updated_at': workflow.updated_at.isoformat(),
+        'metadata': {
+            'workflow_id': str(metadata.workflow_id),
+            'owner_id': str(metadata.owner_id),
+            'name': metadata.name,
+            'description': metadata.description,
+            'tags': list(metadata.tags) if metadata.tags else [],
+            'is_active': metadata.is_active,
+            'custom_fields': metadata.custom_fields,
+            'created_at': metadata.created_at.isoformat(),
+            'updated_at': metadata.updated_at.isoformat(),
+        },
+    }
+
+    def _node_to_dict(n):
+        return {
+            'id': str(n.id),
+            'workflow_id': str(n.workflow_id),
+            'workflow_version': n.workflow_version,
+            'config_type': n.config_type,
+            'execution_mode': n.execution_mode,
+            'function_name': n.function_name,
+            'parameters': n.parameters,
+            'retry_policy': n.retry_policy,
+            'timeout_seconds': n.timeout_seconds,
+            'config': n.config,
+            'delegated_response': n.delegated_response,
+            'step_type': n.step_type,
+            'join_config': n.join_config,
+            'created_at': n.created_at.isoformat(),
+        }
+
+    def _edge_to_dict(e):
+        return {
+            'id': str(e.id),
+            'workflow_id': str(e.workflow_id),
+            'workflow_version': e.workflow_version,
+            'edge_type': e.edge_type,
+            'condition_function': e.condition_function,
+            'data_mapping': e.data_mapping,
+            'source_node_id': str(e.source_node_id),
+            'target_node_id': str(e.target_node_id),
+            'created_at': e.created_at.isoformat(),
+        }
+
+    return {
+        'workflow': wf_dict,
+        'nodes': [_node_to_dict(n) for n in nodes],
+        'edges': [_edge_to_dict(e) for e in edges],
+    }
+
+
+def _setup_pull_mock(mock_client, workflow, metadata, nodes, edges, agents=None, kbs=None):
+    """Configure a mock WorkflowClient for pull tests.
+
+    Sets up get_composite_workflow (used by pull's data fetch) and the
+    individual methods that pull and name resolution still call directly.
+    """
+    mock_client.get_composite_workflow.return_value = _build_composite_response(
+        workflow, metadata, nodes, edges
+    )
+    # Name resolution (find_workflow_by_name) still calls get_metadata
+    mock_client.get_metadata.return_value = metadata
+    mock_client.list_agents.return_value = agents or []
+    mock_client.list_knowledge_bases.return_value = kbs or []
+
+
 # ============================================================================
 # Slugify Tests
 # ============================================================================
@@ -789,12 +871,9 @@ class TestPullByWorkflowID:
     ):
         """Test basic pull by UUID produces yaml + lock files."""
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         output_file = tmp_path / 'test.workflow.yaml'
@@ -835,12 +914,9 @@ class TestPullByWorkflowID:
     ):
         """Test that pulled YAML content is valid WDF."""
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         output_file = tmp_path / 'test.workflow.yaml'
@@ -900,12 +976,9 @@ class TestPullByWorkflowName:
         """Test pull by exact name finds the workflow."""
         mock_client = MagicMock()
         mock_client.list_workflows.return_value = [mock_workflow]
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         output_file = tmp_path / 'test.workflow.yaml'
@@ -980,11 +1053,9 @@ class TestPullByWorkflowName:
             return metadata2
 
         mock_client.get_metadata.side_effect = get_meta
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         # User selects option 1
@@ -1035,12 +1106,9 @@ class TestPullCustomOutputPath:
     ):
         """Test -o flag writes to specified path."""
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         custom_path = tmp_path / 'custom' / 'invoices.workflow.yaml'
@@ -1087,12 +1155,9 @@ class TestPullYamlValidation:
     ):
         """Test that pulled YAML passes the validate command."""
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         output_file = tmp_path / 'test.workflow.yaml'
@@ -2251,12 +2316,9 @@ class TestPostPullValidation:
         from cli.validation.runner import CheckResult, CheckStatus
 
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         # Simulate validation returning a FAIL result
@@ -2311,12 +2373,9 @@ class TestPostPullValidation:
         from cli.validation.runner import CheckResult, CheckStatus
 
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         # Simulate all-PASS validation
@@ -2364,12 +2423,9 @@ class TestPostPullValidation:
         from cli.validation.runner import CheckResult, CheckStatus
 
         mock_client = MagicMock()
-        mock_client.get_workflow.return_value = mock_workflow
-        mock_client.get_metadata.return_value = mock_metadata
-        mock_client.list_nodes.return_value = mock_nodes
-        mock_client.list_edges.return_value = mock_edges
-        mock_client.list_agents.return_value = mock_agents
-        mock_client.list_knowledge_bases.return_value = []
+        _setup_pull_mock(
+            mock_client, mock_workflow, mock_metadata, mock_nodes, mock_edges, agents=mock_agents
+        )
         mock_client_class.from_config.return_value.__enter__.return_value = mock_client
 
         # Simulate validation with FAIL results
