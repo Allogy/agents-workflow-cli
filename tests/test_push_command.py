@@ -377,8 +377,8 @@ def test_wdf_to_api_payload_resolves_kb_refs(workflow_with_kb):
     # Find the retrieval node by its UUID
     retrieval_node_uuid = slug_to_uuid['retrieval']
     retrieval_node = next(n for n in payload['nodes'] if n['id'] == str(retrieval_node_uuid))
-    # knowledge_base_id should be in parameters as knowledgeBaseId (list, for frontend/runtime)
-    assert str(kb_uuid) in retrieval_node['parameters']['knowledgeBaseId']
+    # knowledge_base_id should be in parameters as knowledge_base_ids (list, for runtime)
+    assert str(kb_uuid) in retrieval_node['parameters']['knowledge_base_ids']
     assert 'knowledge_base_name' not in retrieval_node['config']  # Name should be replaced
     assert 'knowledge_base_name' not in retrieval_node['parameters']  # Name should be replaced
 

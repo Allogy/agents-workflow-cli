@@ -356,8 +356,9 @@ def build_node_parameters(
         for key in ('model', 'temperature', 'maxTokens'):
             if key in node_config:
                 params[key] = node_config[key]
+        if 'system_prompt' in node_config:
+            params['systemPrompt'] = node_config['system_prompt']
         if 'primaryInput' in node_config:
-            # Replace slug references with UUID references
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
@@ -370,8 +371,12 @@ def build_node_parameters(
             params['knowledgeBasesOverride'] = node_config['knowledge_base_ids']
         elif 'knowledge_base_id' in node_config:
             params['knowledgeBasesOverride'] = [node_config['knowledge_base_id']]
+        for key in ('model', 'temperature', 'maxTokens'):
+            if key in node_config:
+                params[key] = node_config[key]
+        if 'system_prompt' in node_config:
+            params['systemPrompt'] = node_config['system_prompt']
         if 'primaryInput' in node_config:
-            # Replace slug references with UUID references
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
@@ -392,12 +397,14 @@ def build_node_parameters(
         params['variables'] = []
 
     elif node_type == 'retrieve':
-        # knowledge_base_id -> knowledgeBaseId (as list)
+        # Runtime reads knowledge_base_ids (snake_case, plural).
         if 'knowledge_base_id' in node_config:
-            params['knowledgeBaseId'] = [node_config['knowledge_base_id']]
+            params['knowledge_base_ids'] = [node_config['knowledge_base_id']]
         elif 'knowledgeBaseId' in node_config:
             kb_val = node_config['knowledgeBaseId']
-            params['knowledgeBaseId'] = kb_val if isinstance(kb_val, list) else [kb_val]
+            params['knowledge_base_ids'] = kb_val if isinstance(kb_val, list) else [kb_val]
+        elif 'knowledge_base_ids' in node_config:
+            params['knowledge_base_ids'] = node_config['knowledge_base_ids']
         for key in ('topK', 'scoreThreshold'):
             if key in node_config:
                 params[key] = node_config[key]
@@ -419,13 +426,27 @@ def build_node_parameters(
             params['allowDataEditing'] = node_config['allowEdit']
 
     elif node_type == 'document_extraction':
+        # Use camelCase to match frontend conventions.
         if 'extractTables' in node_config:
-            params['extract_tables'] = node_config['extractTables']
+            params['extractTables'] = node_config['extractTables']
         if 'extractImages' in node_config:
-            params['extract_images'] = node_config['extractImages']
+            params['extractImages'] = node_config['extractImages']
+        if 'fields' in node_config:
+            params['fields'] = node_config['fields']
+        if 'extractionMethod' in node_config:
+            params['extractionMethod'] = node_config['extractionMethod']
+        if 'prompt' in node_config:
+            params['prompt'] = node_config['prompt']
 
     elif node_type == 'structured_output':
-        # schema stays in config, not parameters
+        # Runtime reads schema from parameters, not config.
+        if 'schema' in node_config:
+            params['schema'] = node_config['schema']
+        for key in ('model', 'temperature', 'maxTokens'):
+            if key in node_config:
+                params[key] = node_config[key]
+        if 'system_prompt' in node_config:
+            params['systemPrompt'] = node_config['system_prompt']
         if 'extractionPrompt' in node_config:
             params['extractionPrompt'] = node_config['extractionPrompt']
         if 'primaryInput' in node_config:
@@ -548,42 +569,26 @@ def wdf_to_api_payload(
             slug_to_uuid,
         )
 
-        # Build the config dict for backend runtime
-        # Remove fields that belong exclusively in parameters, not config
+        # Build the config dict for backend runtime.
+        # Most fields live in parameters; config is only used by a few node types.
         runtime_config = {}
-        if node_def.type in ('agent',):
-            # Agent nodes: config holds model_name, temperature, etc.
-            if 'model' in node_config:
-                runtime_config['model_name'] = node_config['model']
-            if 'temperature' in node_config:
-                runtime_config['temperature'] = node_config['temperature']
-            if 'maxTokens' in node_config:
-                runtime_config['max_tokens'] = node_config['maxTokens']
+        if node_def.type == 'agent':
             if 'tools' in node_config:
                 runtime_config['tools'] = node_config['tools']
-        elif node_def.type in ('structured_input', 'structured_output'):
-            # Schema-based nodes keep schema in config
+        elif node_def.type == 'structured_input':
+            # Schema-based input nodes keep schema in config for the UI.
             if 'schema' in node_config:
                 runtime_config['schema'] = node_config['schema']
-            if 'model' in node_config:
-                runtime_config['model'] = node_config['model']
+        elif node_def.type == 'structured_output':
+            # Schema also stays in config for the UI (and is in parameters for runtime).
+            if 'schema' in node_config:
+                runtime_config['schema'] = node_config['schema']
         elif node_def.type == 'retrieve':
-            # Retrieve: config holds enable_reranking, include_metadata, etc.
             if 'enableReranking' in node_config:
                 runtime_config['enable_reranking'] = node_config['enableReranking']
             if 'includeMetadata' in node_config:
                 runtime_config['include_metadata'] = node_config['includeMetadata']
-        elif node_def.type == 'human_review':
-            if 'review_prompt' in node_config:
-                runtime_config['instructions'] = node_config['review_prompt']
-            if 'timeoutMinutes' in node_config:
-                runtime_config['timeoutMinutes'] = node_config['timeoutMinutes']
-            if 'allowApprove' in node_config or 'allowReject' in node_config:
-                runtime_config['requireApproval'] = node_config.get('allowApprove', True)
-            if 'allowEdit' in node_config:
-                runtime_config['allowDataEditing'] = node_config['allowEdit']
-        # For other node types (file_upload, llm_call, rag_agent, etc.)
-        # all data goes in parameters, config stays empty
+        # human_review, llm_call, rag_agent, file_upload — all data in parameters only
 
         # Build node payload with correct schema
         node_payload = {
