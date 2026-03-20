@@ -408,8 +408,15 @@ def build_node_parameters(
             )
 
     elif node_type == 'human_review':
+        # Map WDF field names to the parameter keys the Temporal runtime expects.
         if 'review_prompt' in node_config:
-            params['review_prompt'] = node_config['review_prompt']
+            params['instructions'] = node_config['review_prompt']
+        if 'timeoutMinutes' in node_config:
+            params['timeoutMinutes'] = node_config['timeoutMinutes']
+        if 'allowApprove' in node_config or 'allowReject' in node_config:
+            params['requireApproval'] = node_config.get('allowApprove', True)
+        if 'allowEdit' in node_config:
+            params['allowDataEditing'] = node_config['allowEdit']
 
     elif node_type == 'document_extraction':
         if 'extractTables' in node_config:
@@ -568,13 +575,13 @@ def wdf_to_api_payload(
                 runtime_config['include_metadata'] = node_config['includeMetadata']
         elif node_def.type == 'human_review':
             if 'review_prompt' in node_config:
-                runtime_config['review_prompt'] = node_config['review_prompt']
-            if 'allowApprove' in node_config:
-                runtime_config['allow_approve'] = node_config['allowApprove']
-            if 'allowReject' in node_config:
-                runtime_config['allow_reject'] = node_config['allowReject']
+                runtime_config['instructions'] = node_config['review_prompt']
+            if 'timeoutMinutes' in node_config:
+                runtime_config['timeoutMinutes'] = node_config['timeoutMinutes']
+            if 'allowApprove' in node_config or 'allowReject' in node_config:
+                runtime_config['requireApproval'] = node_config.get('allowApprove', True)
             if 'allowEdit' in node_config:
-                runtime_config['allow_edit'] = node_config['allowEdit']
+                runtime_config['allowDataEditing'] = node_config['allowEdit']
         # For other node types (file_upload, llm_call, rag_agent, etc.)
         # all data goes in parameters, config stays empty
 
@@ -650,7 +657,94 @@ def wdf_to_api_payload(
         }
         payload['edges'].append(edge_payload)
 
+    # Generate a default designer layout from the workflow nodes so the
+    # frontend renderer doesn't show "design schema not configured".
+    layout_wf_id = str(existing_workflow_id) if existing_workflow_id else str(uuid4())
+    payload['metadata']['custom_fields'] = {
+        'designer': _generate_designer_layout(layout_wf_id, payload['nodes']),
+    }
+
     return payload, slug_to_uuid
+
+
+# ---------------------------------------------------------------------------
+# Default designer layout generation
+# ---------------------------------------------------------------------------
+# Maps backend config_type values to (blockType, width, height).
+# Sizes match frontend widgetConstants.ts DEFAULT_WIDGET_SIZES.
+_NODE_TYPE_WIDGET_MAP: dict[str, tuple[str, int, int]] = {
+    'PLAIN_TXT_INPUT': ('input', 8, 2),
+    'STRUCTURED_INPUT': ('form', 8, 5),
+    'FILE_UPLOAD': ('file_input', 8, 3),
+    'LLM_CALL': ('text', 12, 4),
+    'AGENT': ('text', 12, 4),
+    'RAG_AGENT': ('text', 12, 4),
+    'STRUCTURED_OUTPUT': ('text', 12, 4),
+    'RETRIEVE': ('text', 12, 4),
+    'HUMAN_REVIEW': ('human_review', 8, 5),
+}
+
+
+def _generate_designer_layout(
+    workflow_id: str,
+    nodes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a minimal designer layout from the payload nodes.
+
+    Creates one widget per non-FLOW node, using the correct widget type
+    for each node's config_type.  Widgets are stacked vertically and
+    centred within a 12-column grid.
+    """
+    widgets: list[dict[str, Any]] = []
+    y = 0
+
+    for idx, node in enumerate(nodes):
+        mode = (node.get('execution_mode') or '').upper()
+        if mode == 'FLOW':
+            continue
+
+        config_type = (node.get('config_type') or '').upper()
+        block_type, w, h = _NODE_TYPE_WIDGET_MAP.get(config_type, ('text', 12, 3))
+        x = (12 - w) // 2
+
+        widget: dict[str, Any] = {
+            'id': str(uuid4()),
+            'blockType': block_type,
+            'gridItem': {'x': x, 'y': y, 'w': w, 'h': h},
+            'blockMapping': {'blockIndex': idx},
+        }
+
+        node_id = node.get('id')
+        if node_id:
+            if block_type == 'form':
+                widget['formNodeId'] = str(node_id)
+                widget['showSubmitButton'] = True
+                widget['runWorkflowOnSubmit'] = True
+                widget['submitLabel'] = 'Submit'
+            elif block_type in ('input', 'file_input'):
+                widget['inputNodeId'] = str(node_id)
+                widget['runWorkflowWithButton'] = True
+                widget['submitLabel'] = 'Submit'
+            elif block_type == 'human_review':
+                widget['reviewNodeId'] = str(node_id)
+
+        widgets.append(widget)
+        y += h
+
+    return {
+        'id': str(uuid4()),
+        'workflowId': workflow_id,
+        'version': '1.0',
+        'gridConfig': {
+            'columnCount': 12,
+            'rowHeight': 60,
+            'margin': 10,
+            'float': False,
+            'disableOneColumnMode': False,
+        },
+        'widgets': widgets,
+        'updatedAt': datetime.now(UTC).isoformat(),
+    }
 
 
 def push_workflow(
