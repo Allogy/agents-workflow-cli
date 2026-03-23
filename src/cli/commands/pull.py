@@ -203,7 +203,11 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'primaryInput': None,
     },
     'HUMAN_REVIEW': {
+        'instructions': 'review_prompt',
         'review_prompt': None,
+        'timeoutMinutes': None,
+        'requireApproval': 'allowApprove',
+        'allowDataEditing': 'allowEdit',
     },
     'DOCUMENT_EXTRACTION': {
         'extract_tables': 'extractTables',
@@ -246,6 +250,7 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
     },
     'HUMAN_REVIEW': {
         'review_prompt': None,
+        'timeout_minutes': 'timeoutMinutes',
         'allow_approve': 'allowApprove',
         'allow_reject': 'allowReject',
         'allow_edit': 'allowEdit',
