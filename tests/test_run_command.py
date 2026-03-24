@@ -2550,3 +2550,112 @@ class TestRunInteractiveLoop:
             )
 
         assert result.final_event == 'WAITING_FOR_INPUT'
+
+
+# ---------------------------------------------------------------------------
+# STATE_DELTA / STATE_SNAPSHOT / CUSTOM SSE_PAUSING streaming tests
+# ---------------------------------------------------------------------------
+
+
+def test_stream_state_delta_prints_node_output():
+    """STATE_DELTA events should print node output content in streaming mode."""
+    console = Console(no_color=True, file=StringIO())
+    events = [
+        f'data: {json.dumps({"type": "RUN_STARTED", "thread_id": "t1", "run_id": "r1"})}',
+        f'data: {json.dumps({"type": "STEP_STARTED", "node_id": "n1", "node_slug": "llm_call", "step_type": "LLM_CALL"})}',
+        f'data: {json.dumps({"type": "STATE_DELTA", "delta": [{"op": "add", "path": "/node_outputs/n1", "value": {"text": "Hello from LLM"}}]})}',
+        f'data: {json.dumps({"type": "STEP_FINISHED", "node_id": "n1", "node_slug": "llm_call", "duration_ms": 500})}',
+        f'data: {json.dumps({"type": "RUN_FINISHED"})}',
+    ]
+    result = run_streaming(
+        iter(events),
+        output_console=console,
+        max_timeout_seconds=5,
+    )
+    assert result.final_event == 'RUN_FINISHED'
+
+
+def test_stream_state_delta_compact_format_shows_text():
+    """STATE_DELTA compact format should include node output text preview."""
+    event = SSEEvent(
+        event_type='STATE_DELTA',
+        data={
+            'type': 'STATE_DELTA',
+            'delta': [
+                {
+                    'op': 'add',
+                    'path': '/node_outputs/n1',
+                    'value': {'text': 'Hello from LLM'},
+                }
+            ],
+        },
+    )
+    formatted = format_sse_compact(event)
+    assert 'Hello from LLM' in formatted
+    assert 'STATE_DELTA' in formatted
+
+
+def test_stream_state_snapshot_compact_format_shows_count():
+    """STATE_SNAPSHOT compact format should show node output count."""
+    event = SSEEvent(
+        event_type='STATE_SNAPSHOT',
+        data={
+            'type': 'STATE_SNAPSHOT',
+            'snapshot': {
+                'node_outputs': {'n1': {'text': 'a'}, 'n2': {'text': 'b'}},
+            },
+        },
+    )
+    formatted = format_sse_compact(event)
+    assert '2 node outputs' in formatted
+    assert 'STATE_SNAPSHOT' in formatted
+
+
+def test_stream_custom_sse_pausing_detected():
+    """CUSTOM SSE_PAUSING event should be handled without hanging."""
+    console = Console(no_color=True, file=StringIO())
+    events = [
+        f'data: {json.dumps({"type": "RUN_STARTED", "thread_id": "t1", "run_id": "r1"})}',
+        f'data: {json.dumps({"type": "STEP_STARTED", "node_id": "n1", "node_slug": "review", "step_type": "HUMAN_REVIEW"})}',
+        f'data: {json.dumps({"type": "CUSTOM", "name": "SSE_PAUSING", "value": {}})}',
+        f'data: {json.dumps({"type": "WAITING_FOR_REVIEW", "node_id": "n1"})}',
+    ]
+    result = run_streaming(
+        iter(events),
+        output_console=console,
+        max_timeout_seconds=5,
+    )
+    assert result.final_event == 'WAITING_FOR_REVIEW'
+
+
+def test_stream_text_message_content_compact_format():
+    """TEXT_MESSAGE_CONTENT compact format should show content preview."""
+    event = SSEEvent(
+        event_type='TEXT_MESSAGE_CONTENT',
+        data={'type': 'TEXT_MESSAGE_CONTENT', 'content': 'Here is the answer'},
+    )
+    formatted = format_sse_compact(event)
+    assert 'Here is the answer' in formatted
+    assert 'TEXT_MESSAGE_CONTENT' in formatted
+
+
+def test_stream_tool_call_start_compact_format():
+    """TOOL_CALL_START compact format should show tool name."""
+    event = SSEEvent(
+        event_type='TOOL_CALL_START',
+        data={'type': 'TOOL_CALL_START', 'name': 'web_search'},
+    )
+    formatted = format_sse_compact(event)
+    assert 'web_search' in formatted
+    assert 'TOOL_CALL_START' in formatted
+
+
+def test_stream_custom_event_compact_format():
+    """CUSTOM compact format should show custom event name."""
+    event = SSEEvent(
+        event_type='CUSTOM',
+        data={'type': 'CUSTOM', 'name': 'SSE_PAUSING', 'value': {}},
+    )
+    formatted = format_sse_compact(event)
+    assert 'SSE_PAUSING' in formatted
+    assert 'CUSTOM' in formatted

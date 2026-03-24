@@ -45,7 +45,13 @@ from cli.config import CLIConfig, get_run_timeout
 from cli.console import get_console
 from cli.last_run import LastRunContext, save_last_run
 from cli.lockfile import load_lockfile
-from cli.sse import SSEEvent, parse_sse_line
+from cli.sse import (
+    HITL_EVENTS,
+    TERMINAL_EVENTS,
+    AGUIEventType,
+    SSEEvent,
+    parse_sse_line,
+)
 
 _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
 
@@ -473,8 +479,8 @@ def _poll_until_next_event(
 # SSE streaming execution
 # ---------------------------------------------------------------------------
 
-_SSE_TERMINAL_EVENTS = {'RUN_FINISHED', 'RUN_ERROR'}
-_SSE_HITL_EVENTS = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
+_SSE_TERMINAL_EVENTS = {e.value for e in TERMINAL_EVENTS}
+_SSE_HITL_EVENTS = {e.value for e in HITL_EVENTS} - {AGUIEventType.REVIEW_COMPLETE.value}
 
 # Color mapping by event type category
 _SSE_COLOR_MAP: dict[str, str] = {
@@ -483,10 +489,21 @@ _SSE_COLOR_MAP: dict[str, str] = {
     'RUN_FINISHED': 'green',
     'REVIEW_COMPLETE': 'green',
     'STEP_STARTED': 'blue',
+    'STATE_SNAPSHOT': 'blue',
+    'STATE_DELTA': 'cyan',
+    'TEXT_MESSAGE_START': 'cyan',
+    'TEXT_MESSAGE_CONTENT': 'cyan',
+    'TEXT_MESSAGE_END': 'cyan',
+    'TOOL_CALL_START': 'magenta',
+    'TOOL_CALL_ARGS': 'magenta',
+    'TOOL_CALL_END': 'magenta',
+    'TOOL_CALL_RESULT': 'magenta',
     'WAITING_FOR_REVIEW': 'yellow',
     'WAITING_FOR_INPUT': 'yellow',
     'STEP_ERROR': 'red',
     'RUN_ERROR': 'red',
+    'CUSTOM': 'dim',
+    'RAW': 'dim',
 }
 
 _KNOWN_EVENT_TYPES = set(_SSE_COLOR_MAP.keys())
@@ -563,6 +580,33 @@ def format_sse_compact(event: SSEEvent, *, step: int = 0, total_nodes: int = 0) 
         duration_ms = event.data.get('duration_ms')
         if duration_ms is not None:
             suffix += f' [dim]{_format_duration_ms(duration_ms)}[/dim]'
+    elif t == 'STATE_DELTA':
+        delta = event.data.get('delta', [])
+        for op in delta:
+            path = op.get('path', '')
+            value = op.get('value')
+            if '/node_outputs/' in path and isinstance(value, dict):
+                text = value.get('text') or value.get('content') or value.get('response', '')
+                if text and isinstance(text, str):
+                    preview = text[:200] + '...' if len(text) > 200 else text
+                    suffix += f': {preview}'
+    elif t == 'STATE_SNAPSHOT':
+        snapshot = event.data.get('snapshot', event.data)
+        node_outputs = snapshot.get('node_outputs', {})
+        if node_outputs:
+            suffix += f' ({len(node_outputs)} node outputs)'
+    elif t == 'TEXT_MESSAGE_CONTENT':
+        content = event.data.get('content', '')
+        if content:
+            suffix += f': {content[:200]}'
+    elif t == 'TOOL_CALL_START':
+        tool_name = event.data.get('name', '')
+        if tool_name:
+            suffix += f' ({tool_name})'
+    elif t == 'CUSTOM':
+        name = event.data.get('name', '')
+        if name:
+            suffix += f' ({name})'
     elif t in ('STEP_ERROR', 'RUN_ERROR'):
         error = event.data.get('error', '')
         if error:
@@ -719,6 +763,12 @@ def run_streaming(
 
         event_type_upper = event.event_type.upper()
         node_id = event.data.get('node_id', '')
+
+        # Handle CUSTOM SSE_PAUSING: stream is about to close for HITL
+        if event_type_upper == 'CUSTOM' and event.data.get('name') == 'SSE_PAUSING':
+            out.print(fmt(event, step=len(seen_nodes), total_nodes=total_nodes))
+            last_event_type = event.event_type
+            continue
 
         # Unknown event routing
         if (
