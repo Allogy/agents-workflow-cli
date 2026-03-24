@@ -101,17 +101,33 @@ class PathType(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
+    """Superset of all execution statuses the backend can send.
+
+    Covers values from three backend layers:
+    - Core domain (WorkflowStatus): pending, running, paused, completed, failed, cancelled
+    - DB/ORM (ExecutionStatus in schemas): PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+    - Durable execution (WorkflowExecutionStatus): RUNNING, COMPLETED, FAILED, CANCELLED,
+      TIMED_OUT, PAUSED, WAITING_FOR_REVIEW
+
+    Note: The old TIMEOUT member has been removed. The backend sends TIMED_OUT.
+    Defensive string parsing for 'TIMEOUT' is handled in run.py terminal status sets.
+    """
+
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
+    PAUSED = 'PAUSED'
     COMPLETED = 'COMPLETED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
-    TIMEOUT = 'TIMEOUT'
+    TIMED_OUT = 'TIMED_OUT'
+    WAITING_FOR_REVIEW = 'WAITING_FOR_REVIEW'
+    WAITING_FOR_INPUT = 'WAITING_FOR_INPUT'
 
 
 class NodeExecutionStatus(str, Enum):
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
+    WAITING_INPUT = 'WAITING_INPUT'
     COMPLETED = 'COMPLETED'
     FAILED = 'FAILED'
     SKIPPED = 'SKIPPED'

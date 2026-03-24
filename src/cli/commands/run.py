@@ -221,7 +221,7 @@ def resolve_workflow_id(
 
 
 # Terminal statuses — stop polling when any of these is reached
-_TERMINAL_STATUSES = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'}
+_TERMINAL_STATUSES = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'TIMEOUT'}
 _HITL_STATUSES = {'WAITING_FOR_REVIEW', 'WAITING_FOR_INPUT'}
 
 
@@ -1225,7 +1225,7 @@ def run_command(
 
 
 # Statuses that indicate workflow failure (exit code 1)
-_FAILURE_STATUSES = {'FAILED', 'RUN_ERROR', 'CANCELLED', 'TIMED_OUT'}
+_FAILURE_STATUSES = {'FAILED', 'RUN_ERROR', 'CANCELLED', 'TIMED_OUT', 'TIMEOUT'}
 
 
 def _print_final_status(

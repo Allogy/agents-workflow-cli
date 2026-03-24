@@ -57,8 +57,8 @@ def test_cli_can_import_all_enums():
     assert len(StepExecutionType) == 4
     assert len(ReducerType) == 7
     assert len(PathType) == 3
-    assert len(ExecutionStatus) == 6
-    assert len(NodeExecutionStatus) == 5
+    assert len(ExecutionStatus) == 9
+    assert len(NodeExecutionStatus) == 6
 
 
 def test_cli_can_import_all_schemas():

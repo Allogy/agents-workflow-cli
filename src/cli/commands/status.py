@@ -35,7 +35,12 @@ STATUS_STYLES: dict[str, str] = {
     'RUNNING': 'yellow',
     'WAITING_FOR_INPUT': 'yellow',
     'WAITING_FOR_REVIEW': 'yellow',
+    'WAITING_INPUT': 'yellow',
+    'PAUSED': 'yellow',
     'FAILED': 'red',
+    'TIMED_OUT': 'red',
+    'TIMEOUT': 'red',
+    'CANCELLED': 'red',
     'PENDING': 'dim',
 }
 
