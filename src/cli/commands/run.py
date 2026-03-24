@@ -301,6 +301,60 @@ def _poll_with_retry(
     raise RuntimeError('Unreachable')  # pragma: no cover
 
 
+_STREAM_RETRY_ATTEMPTS = 2
+_STREAM_RETRY_DELAY_S = 1.5
+_RETRYABLE_STATUS_CODES = {502, 503}
+
+
+def _stream_with_retry(
+    client: WorkflowClient,
+    workflow_id: str,
+    *,
+    run_id: str,
+    inputs: dict[str, Any],
+    max_retries: int = _STREAM_RETRY_ATTEMPTS,
+    retry_delay: float = _STREAM_RETRY_DELAY_S,
+    output_console: Console | None = None,
+) -> Any:
+    """Open SSE stream with retry on transient HTTP errors (502, 503).
+
+    Returns:
+        Context manager from client.stream_workflow_temporal.
+
+    Raises:
+        httpx.HTTPStatusError: If all retries exhausted or non-retryable error.
+    """
+    out = output_console or get_console()
+    last_err: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return client.stream_workflow_temporal(workflow_id, run_id=run_id, inputs=inputs)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in _RETRYABLE_STATUS_CODES:
+                raise
+            last_err = e
+            if attempt < max_retries:
+                out.print(
+                    f'[dim]Transient error ({e.response.status_code}), '
+                    f'retrying in {retry_delay:.1f}s... '
+                    f'({attempt + 1}/{max_retries})[/dim]'
+                )
+                time.sleep(retry_delay)
+        except (httpx.ConnectError, httpx.ReadError) as e:
+            last_err = e
+            if attempt < max_retries:
+                out.print(
+                    f'[dim]Network error, retrying in {retry_delay:.1f}s... '
+                    f'({attempt + 1}/{max_retries})[/dim]'
+                )
+                time.sleep(retry_delay)
+            else:
+                raise
+
+    raise last_err  # type: ignore[misc]
+
+
 def run_polling(
     client: WorkflowClient,
     workflow_id: str,
@@ -1168,8 +1222,12 @@ def run_command(
             )
             save_last_run(cwd, ctx)
 
-            with client.stream_workflow_temporal(
-                workflow_id, run_id=run_id, inputs=inputs
+            with _stream_with_retry(
+                client,
+                workflow_id,
+                run_id=run_id,
+                inputs=inputs,
+                output_console=output_console,
             ) as response:
                 result = run_streaming(
                     response.iter_lines(),

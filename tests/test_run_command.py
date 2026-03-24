@@ -2659,3 +2659,132 @@ def test_stream_custom_event_compact_format():
     formatted = format_sse_compact(event)
     assert 'SSE_PAUSING' in formatted
     assert 'CUSTOM' in formatted
+
+
+class TestStreamRetry:
+    """Tests for _stream_with_retry transient error handling."""
+
+    def _make_503_error(self):
+        request = httpx.Request('POST', 'http://test/v2/workflows/wf1/run/temporal')
+        response = httpx.Response(503, request=request)
+        return httpx.HTTPStatusError('Service Unavailable', request=request, response=response)
+
+    def _make_success_ctx(self):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def ctx():
+            class FakeResponse:
+                def iter_lines(self):
+                    return iter(
+                        [
+                            f'data: {json.dumps({"type": "RUN_STARTED"})}',
+                            f'data: {json.dumps({"type": "RUN_FINISHED"})}',
+                        ]
+                    )
+
+            yield FakeResponse()
+
+        return ctx()
+
+    def test_retries_on_503_then_succeeds(self):
+        from unittest.mock import MagicMock
+
+        from cli.commands.run import _stream_with_retry
+
+        call_count = 0
+        client = MagicMock()
+
+        def fake_stream(wf_id, *, run_id, inputs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise self._make_503_error()
+            return self._make_success_ctx()
+
+        client.stream_workflow_temporal = fake_stream
+        console = Console(no_color=True, file=open('/dev/null', 'w'))
+        result = _stream_with_retry(
+            client,
+            'wf1',
+            run_id='r1',
+            inputs={},
+            max_retries=2,
+            retry_delay=0.01,
+            output_console=console,
+        )
+        assert call_count == 3
+        assert result is not None
+
+    def test_exhausts_retries_on_persistent_503(self):
+        from unittest.mock import MagicMock
+
+        from cli.commands.run import _stream_with_retry
+
+        client = MagicMock()
+        client.stream_workflow_temporal.side_effect = self._make_503_error()
+        console = Console(no_color=True, file=open('/dev/null', 'w'))
+        with pytest.raises(httpx.HTTPStatusError):
+            _stream_with_retry(
+                client,
+                'wf1',
+                run_id='r1',
+                inputs={},
+                max_retries=2,
+                retry_delay=0.01,
+                output_console=console,
+            )
+        assert client.stream_workflow_temporal.call_count == 3
+
+    def test_no_retry_on_400(self):
+        from unittest.mock import MagicMock
+
+        from cli.commands.run import _stream_with_retry
+
+        client = MagicMock()
+        request = httpx.Request('POST', 'http://test/v2/workflows/wf1/run/temporal')
+        response = httpx.Response(400, request=request)
+        client.stream_workflow_temporal.side_effect = httpx.HTTPStatusError(
+            'Bad Request', request=request, response=response
+        )
+        console = Console(no_color=True, file=open('/dev/null', 'w'))
+        with pytest.raises(httpx.HTTPStatusError):
+            _stream_with_retry(
+                client,
+                'wf1',
+                run_id='r1',
+                inputs={},
+                max_retries=2,
+                retry_delay=0.01,
+                output_console=console,
+            )
+        assert client.stream_workflow_temporal.call_count == 1
+
+    def test_retries_on_connect_error(self):
+        from unittest.mock import MagicMock
+
+        from cli.commands.run import _stream_with_retry
+
+        call_count = 0
+        client = MagicMock()
+
+        def fake_stream(wf_id, *, run_id, inputs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise httpx.ConnectError('Connection refused')
+            return self._make_success_ctx()
+
+        client.stream_workflow_temporal = fake_stream
+        console = Console(no_color=True, file=open('/dev/null', 'w'))
+        result = _stream_with_retry(
+            client,
+            'wf1',
+            run_id='r1',
+            inputs={},
+            max_retries=2,
+            retry_delay=0.01,
+            output_console=console,
+        )
+        assert call_count == 2
+        assert result is not None
