@@ -154,6 +154,46 @@ To view node outputs for a previously completed run, use:
 workflow status --show-outputs
 ```
 
+## Retry Behavior
+
+In streaming mode (`--stream`), the CLI automatically retries on transient server errors:
+
+- **502/503 errors** — retried up to 2 attempts with a 1.5-second delay between attempts. These indicate the server is temporarily unavailable or overloaded.
+- **Network errors** — connection failures and timeouts are retried under the same policy (2 attempts, 1.5s delay).
+- **Non-retryable errors** — 400 (bad request) and 404 (not found) fail immediately without retrying, as these indicate a client-side error that will not resolve on retry.
+
+## SSE Events
+
+Streaming mode processes AG-UI SSE events from the Temporal runtime and renders them with color coding by event type.
+
+### Key Event Types
+
+| Event | Behavior |
+|-------|----------|
+| `STATE_DELTA` | Extracts and displays node output text in real time |
+| `CUSTOM` with `SSE_PAUSING` | Detected as a HITL pause signal — exits cleanly without hanging |
+| `RUN_STARTED` | Displays run ID and confirms execution has begun |
+| `RUN_FINISHED` | Triggers node output fetch and final status display |
+| `STEP_STARTED` / `STEP_FINISHED` | Shows node progress with step name |
+| `TEXT_MESSAGE_*` | Streams assistant message content as it arrives |
+| `TOOL_CALL_*` | Shows tool invocations during node execution |
+
+Use `--verbose` to see full event payloads with field excerpts for all event types.
+
+## Workflow Statuses
+
+The following workflow statuses may be encountered during or after execution:
+
+| Status | Description |
+|--------|-------------|
+| `RUNNING` | Workflow is actively executing |
+| `COMPLETED` | Workflow finished successfully |
+| `FAILED` | Workflow encountered an unrecoverable error |
+| `PAUSED` | Workflow is paused (manual pause or HITL gate) |
+| `TIMED_OUT` | Workflow exceeded its execution time limit |
+| `WAITING_FOR_INPUT` | Workflow paused at an INPUT node awaiting user data |
+| `WAITING_FOR_REVIEW` | Workflow paused at a REVIEW node awaiting human decision |
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -187,3 +227,11 @@ workflow run my-workflow --no-follow
 # Disable color for CI pipelines
 workflow run my-workflow --stream --no-color
 ```
+
+## See Also
+
+- [Temporal Execution Guide](temporal-execution.md) — complete lifecycle and troubleshooting
+- [SSE Event Reference](sse-events.md) — all event types and their fields
+- [Status Command](status-command.md) — check workflow state
+- [Input Command](input-command.md) — submit data to paused input nodes
+- [Review Command](review-command.md) — submit review decisions
