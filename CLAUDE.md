@@ -90,6 +90,7 @@ Full type annotations required. Absolute imports only — never relative.
 - **CodeArtifact publishing:** bump version in `pyproject.toml` before publishing.
 - **Context7 MCP:** always use for library/API documentation when needed.
 - **This is a submodule** — commit here first, then update the reference in the parent repo.
+- **No domain logic in the CLI:** Business rules belong in the backend. The CLI is a primary (driving) adapter — it translates CLI commands into API calls. Shared models define the contract; they must stay pure Pydantic without backend dependencies.
 
 ## Before Committing
 
