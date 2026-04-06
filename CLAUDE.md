@@ -31,6 +31,8 @@ make codeartifact-publish-models              # Publish shared models
 
 ## Architecture
 
+> **Architectural Principles:** The platform follows the Explicit Architecture pattern (Hexagonal + Clean Architecture + DDD). The CLI acts as a **primary (driving) adapter** — it translates CLI commands into API calls. Shared models define the contract between CLI and backend. See `../backend/docs/ARCHITECTURE_PRINCIPLES.md` for the full platform architecture guide.
+
 For deep-dives, read the referenced docs:
 - `docs/init-command.md` — scaffold workflows from 7 templates
 - `docs/validate-command.md` — 10 offline validation checks
