@@ -18,6 +18,11 @@ uv run workflow init                          # Scaffold from templates
 uv run workflow list                          # List workflows
 uv run workflow delete <uuid-or-name>         # Delete workflow
 uv run workflow run <uuid-or-name>            # Execute via Temporal
+uv run workflow run <id> --stream             # Execute with SSE streaming
+uv run workflow run <id> --stream --interactive  # Interactive HITL mode (prompts for input/review)
+uv run workflow status <run-id>               # Check execution status (node-by-node detail)
+uv run workflow input <run-id> --node-id <id> --data '...'  # Submit data to paused INPUT node
+uv run workflow review <run-id> --node-id <id> --approve    # Submit review decision to HUMAN_REVIEW node
 uv run ruff check .                           # Lint
 uv run ruff format .                          # Format
 uv run pytest                                 # Run tests
@@ -39,6 +44,11 @@ For deep-dives, read the referenced docs:
 - `docs/push-command.md` — deploy with lockfile and dependency resolution
 - `docs/pull-command.md` — export workflows to YAML
 - `docs/run-command.md` — execute workflows via Temporal
+- `docs/status-command.md` — check execution state with node-by-node detail
+- `docs/input-command.md` — submit data to paused INPUT nodes
+- `docs/review-command.md` — submit review decisions to HUMAN_REVIEW nodes
+- `docs/sse-events.md` — SSE event types during streaming execution
+- `docs/temporal-execution.md` — Temporal execution lifecycle and modes
 - `docs/codeartifact.md` — CodeArtifact publishing guide
 - `shared-models/README.md` — shared Pydantic models package
 
@@ -54,6 +64,8 @@ src/cli/
   exceptions.py        # CLI-specific exceptions
   last_run.py           # .workflow.last_run context file I/O
   sse.py               # SSE event parsing for streaming mode
+  interactive.py       # HITL prompting for --interactive mode
+  console.py           # Rich console factory with --no-color support
   commands/             # One module per CLI command (init, validate, push, pull, list, delete, run, status, input, review)
   validation/           # Validation runner (10 offline checks)
   templates/            # Scaffold templates for `workflow init`
@@ -71,6 +83,7 @@ shared-models/src/workflow_models/
 - **API client:** `WorkflowClient` using httpx with `X-API-Key` auth. Config precedence: CLI flags, env vars, `~/.workflow/config.yaml`, defaults.
 - **Shared models (`shared-models/`):** Pure Pydantic v2 with zero SQLAlchemy dependency. Contains API schemas (`schemas/`) and WDF models (`wdf/`). Published as `agents-workflow-models` to CodeArtifact.
 - **Entry point:** `cli.main:app` (Typer application). Installed as `workflow` command via `[project.scripts]`.
+- **Exit codes for `workflow run`:** 0 = success or HITL pause, 1 = runtime error (network, server, timeout), 2 = user error (bad input, file not found, invalid JSON).
 
 ## Code Style
 
