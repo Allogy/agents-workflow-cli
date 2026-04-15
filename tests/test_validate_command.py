@@ -7,7 +7,6 @@ Reference: Jira RAG-947
 """
 
 from pathlib import Path
-
 from types import SimpleNamespace
 
 from cli.validation.runner import (

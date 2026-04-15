@@ -25,12 +25,12 @@ from enum import Enum
 
 import yaml
 from pydantic import ValidationError
+from workflow_models.wdf.nodes import NODE_TYPE_CONFIG_MAP
 from workflow_models.wdf.validation import (
     check_cycles,
     check_reachability,
     check_variable_references,
 )
-from workflow_models.wdf.nodes import NODE_TYPE_CONFIG_MAP
 from workflow_models.wdf.variable_ref import extract_variable_refs
 from workflow_models.wdf.workflow import WorkflowDefinition
 
