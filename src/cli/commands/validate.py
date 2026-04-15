@@ -63,7 +63,8 @@ def validate_command(file_path: Path, *, offline: bool = False) -> None:
     # Run validations
     console.print(f'[bold]Validating:[/bold] {file_path}')
     console.print()
-    results = run_all_validations(yaml_content)
+    registry_data = registry_result.registry if registry_result else None
+    results = run_all_validations(yaml_content, registry=registry_data)
 
     # Display results in a table
     table = Table(show_header=True, header_style='bold')
