@@ -40,6 +40,7 @@ class CheckStatus(str, Enum):
     PASS = 'PASS'
     FAIL = 'FAIL'
     WARN = 'WARN'
+    SKIP = 'SKIP'  # Registry checks skipped (offline, no cache, --offline flag)
 
 
 @dataclass
