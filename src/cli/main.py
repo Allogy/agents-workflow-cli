@@ -15,6 +15,7 @@ from cli.commands.input import input_command
 from cli.commands.list import list_command
 from cli.commands.pull import pull_workflow
 from cli.commands.push import push_workflow
+from cli.commands.registry import registry_app
 from cli.commands.review import review_command
 from cli.commands.run import run_command
 from cli.commands.status import status_command
@@ -28,6 +29,7 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode='rich',
 )
+app.add_typer(registry_app, name='registry')
 
 # Module-level state (set by the callback)
 _config: CLIConfig | None = None
