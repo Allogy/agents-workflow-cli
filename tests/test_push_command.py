@@ -1425,7 +1425,10 @@ class TestPushWorkflowOrchestratorCreatesLockfile:
     """Push command creates .workflow.lock on first push."""
 
     @patch('cli.commands.push.WorkflowClient')
-    def test_push_creates_lockfile_on_first_push(self, mock_client_class, tmp_path: Path):
+    @patch('cli.commands.push.get_registry', return_value=None)
+    def test_push_creates_lockfile_on_first_push(
+        self, mock_get_registry, mock_client_class, tmp_path: Path
+    ):
         """push_workflow creates a .workflow.lock file after successful push."""
         yaml_file = tmp_path / 'test.workflow.yaml'
         yaml_file.write_text(VALID_WORKFLOW_YAML)
@@ -1461,7 +1464,10 @@ class TestPushWorkflowOrchestratorCreatesLockfile:
         assert len(lock.nodes) == 2  # input + output
 
     @patch('cli.commands.push.WorkflowClient')
-    def test_push_uses_lockfile_for_idempotent_update(self, mock_client_class, tmp_path: Path):
+    @patch('cli.commands.push.get_registry', return_value=None)
+    def test_push_uses_lockfile_for_idempotent_update(
+        self, mock_get_registry, mock_client_class, tmp_path: Path
+    ):
         """Subsequent push reads lockfile and sends workflow_id for update (not create)."""
         yaml_file = tmp_path / 'test.workflow.yaml'
         yaml_file.write_text(VALID_WORKFLOW_YAML)
@@ -1510,7 +1516,8 @@ class TestPushWorkflowOrchestratorHandlesApiErrors:
     """Push command handles API errors with meaningful messages."""
 
     @patch('cli.commands.push.WorkflowClient')
-    def test_push_handles_api_error(self, mock_client_class, tmp_path: Path):
+    @patch('cli.commands.push.get_registry', return_value=None)
+    def test_push_handles_api_error(self, mock_get_registry, mock_client_class, tmp_path: Path):
         """push_workflow raises PushError when API call fails."""
         yaml_file = tmp_path / 'test.workflow.yaml'
         yaml_file.write_text(VALID_WORKFLOW_YAML)
@@ -1529,7 +1536,10 @@ class TestPushWorkflowOrchestratorHandlesApiErrors:
             push_workflow(yaml_file, config)
 
     @patch('cli.commands.push.WorkflowClient')
-    def test_push_handles_dependency_resolution_error(self, mock_client_class, tmp_path: Path):
+    @patch('cli.commands.push.get_registry', return_value=None)
+    def test_push_handles_dependency_resolution_error(
+        self, mock_get_registry, mock_client_class, tmp_path: Path
+    ):
         """push_workflow raises PushError when agent dependency cannot be resolved."""
         yaml_with_agent = tmp_path / 'agent.workflow.yaml'
         yaml_with_agent.write_text("""\

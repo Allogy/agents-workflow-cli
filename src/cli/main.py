@@ -218,6 +218,13 @@ def push(
             exists=True,
         ),
     ],
+    skip_contract_check: Annotated[
+        bool,
+        typer.Option(
+            '--skip-contract-check',
+            help='Skip contract validation against registry schemas.',
+        ),
+    ] = False,
 ) -> None:
     """Push a workflow to the platform.
 
@@ -232,11 +239,12 @@ def push(
 
     Examples:
         workflow push my-workflow.workflow.yaml
+        workflow push --skip-contract-check my-workflow.workflow.yaml
         workflow push --host https://api.example.com --api-key xxx workflow.yaml
     """
     config = get_config()
     try:
-        push_workflow(file_path, config)
+        push_workflow(file_path, config, skip_contract_check=skip_contract_check)
     except Exception as e:
         get_console().print(f'[bold red]Error:[/bold red] {e}')
         raise typer.Exit(1) from e

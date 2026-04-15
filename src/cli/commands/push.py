@@ -30,7 +30,9 @@ from workflow_models.wdf.nodes import NodeDefinition
 
 from cli.client import WorkflowClient
 from cli.config import CLIConfig
+from cli.contract import format_contract_errors, validate_contract
 from cli.lockfile import WorkflowLock, get_lockfile_path, load_lockfile, save_lockfile
+from cli.registry import get_registry
 from cli.validation.runner import run_all_validations
 from cli.wdf_yaml import load_workflow_yaml
 
@@ -744,11 +746,13 @@ def _generate_designer_layout(
 def push_workflow(
     file_path: Path,
     config: CLIConfig,
+    skip_contract_check: bool = False,
 ) -> None:
     """Push a workflow to the platform.
 
     Orchestrates the complete push process:
     1. Load and validate YAML
+    1b. Contract validation against registry schema (unless skipped)
     2. Check lockfile (create vs. update mode)
     3. Resolve dependencies
     4. Convert WDF to API payload
@@ -759,6 +763,7 @@ def push_workflow(
     Args:
         file_path: Path to the .workflow.yaml file.
         config: Resolved CLI configuration.
+        skip_contract_check: If True, skip contract validation against registry schemas.
 
     Raises:
         PushError: If any step fails.
@@ -793,6 +798,27 @@ def push_workflow(
         console.print('[yellow]Warnings:[/yellow]')
         for warning in warnings:
             console.print(f'  • {warning.check_name}: {warning.message}')
+
+    # Step 1b: Contract validation against registry schema
+    if not skip_contract_check:
+        console.print('[dim]Checking contracts...[/dim]', end=' ')
+        registry_result = get_registry(config.host)
+        if registry_result is None:
+            console.print('[yellow]skipped[/yellow] (registry unavailable)')
+        else:
+            if registry_result.is_stale:
+                console.print('[yellow]using stale cache[/yellow]')
+                console.print('[dim]Checking contracts...[/dim]', end=' ')
+            contract_errors = validate_contract(workflow, registry_result.registry)
+            if contract_errors:
+                console.print('[bold red]failed[/bold red]')
+                console.print('[red]Contract validation failed:[/red]')
+                console.print(format_contract_errors(contract_errors))
+                raise PushError(
+                    f'Contract validation failed with {len(contract_errors)} error(s). '
+                    'Use --skip-contract-check to bypass.'
+                )
+            console.print('[green]\u2713[/green]')
 
     # Step 2: Check lockfile
     lockfile_path = get_lockfile_path(file_path)
