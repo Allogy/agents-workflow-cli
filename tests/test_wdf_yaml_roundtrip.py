@@ -329,3 +329,126 @@ exit: llm
         wf2 = load_workflow_yaml(output_yaml)
 
         assert wf2.nodes['llm'].config['template'] == 'Process: {{input.output.text}}'
+
+
+class TestNewFieldRoundTrip:
+    """Round-trip tests for fields added in Phase 43: timeout_seconds, topK, system_prompt."""
+
+    def test_timeout_seconds_roundtrip(self):
+        """timeout_seconds on a node survives parse -> dump -> parse."""
+        yaml_str = """\
+name: Timeout Test
+description: Tests timeout_seconds round-trip
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: "Enter text"
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    timeout_seconds: 60
+    config:
+      primaryInput: "{{input.output.text}}"
+edges:
+  - from: input
+    to: agent
+entry: input
+exit: agent
+"""
+        wf = load_workflow_yaml(yaml_str)
+        assert wf.nodes['agent'].timeout_seconds == 60
+
+        output_yaml = dump_workflow_yaml(wf)
+        wf2 = load_workflow_yaml(output_yaml)
+        assert wf2.nodes['agent'].timeout_seconds == 60
+
+    def test_topk_roundtrip(self):
+        """topK in rag_agent config survives parse -> dump -> parse."""
+        yaml_str = """\
+name: TopK Test
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: "Enter text"
+  rag:
+    type: rag_agent
+    execution_mode: MESSAGES
+    config:
+      agent_name: My Agent
+      knowledge_base_names:
+        - My KB
+      topK: 10
+      primaryInput: "{{input.output.text}}"
+edges:
+  - from: input
+    to: rag
+entry: input
+exit: rag
+"""
+        wf = load_workflow_yaml(yaml_str)
+        assert wf.nodes['rag'].config['topK'] == 10
+
+        output_yaml = dump_workflow_yaml(wf)
+        wf2 = load_workflow_yaml(output_yaml)
+        assert wf2.nodes['rag'].config['topK'] == 10
+
+    def test_system_prompt_on_agent_roundtrip(self):
+        """system_prompt in agent config survives parse -> dump -> parse."""
+        yaml_str = """\
+name: System Prompt Test
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: "Enter text"
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    config:
+      primaryInput: "{{input.output.text}}"
+      system_prompt: "You are a helpful assistant"
+edges:
+  - from: input
+    to: agent
+entry: input
+exit: agent
+"""
+        wf = load_workflow_yaml(yaml_str)
+        assert wf.nodes['agent'].config['system_prompt'] == 'You are a helpful assistant'
+
+        output_yaml = dump_workflow_yaml(wf)
+        wf2 = load_workflow_yaml(output_yaml)
+        assert wf2.nodes['agent'].config['system_prompt'] == 'You are a helpful assistant'
+
+    def test_new_fields_absent_when_not_set(self):
+        """When new fields are not set, they do not appear in dumped YAML."""
+        yaml_str = """\
+name: No New Fields
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: "Enter text"
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    config:
+      primaryInput: "{{input.output.text}}"
+edges:
+  - from: input
+    to: agent
+entry: input
+exit: agent
+"""
+        wf = load_workflow_yaml(yaml_str)
+        output_yaml = dump_workflow_yaml(wf)
+
+        # timeout_seconds and system_prompt should not appear when unset
+        assert 'timeout_seconds' not in output_yaml
+        assert 'system_prompt' not in output_yaml
