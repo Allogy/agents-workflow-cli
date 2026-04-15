@@ -2439,3 +2439,161 @@ class TestPostPullValidation:
         # File should have content
         content = output_file.read_text()
         assert len(content) > 0
+
+
+# ============================================================================
+# Pull New Field Mapping — systemPrompt, topK, timeout_seconds (Phase 43-02)
+# ============================================================================
+
+
+class TestPullNewFieldMapping:
+    """Test pull mapping for systemPrompt, topK, and timeout_seconds.
+
+    Phase 43-02: These fields were added to WDF models in plan 43-01.
+    Pull must extract them from API responses so round-trip is symmetric.
+    """
+
+    def test_agent_system_prompt_extracted(self):
+        """AGENT node systemPrompt parameter maps to system_prompt in WDF config."""
+        parameters = {
+            'agentId': str(uuid4()),
+            'model': 'gpt-4',
+            'systemPrompt': 'Be helpful',
+            'type': 'agent',
+            'label': 'x',
+            'function_name': 'x',
+            'collapsed': False,
+            'validationLevel': 'ok',
+            'validationMessages': [],
+        }
+        result = extract_node_config('AGENT', parameters, {})
+        assert result['system_prompt'] == 'Be helpful'
+        assert 'systemPrompt' not in result
+
+    def test_rag_agent_topk_extracted(self):
+        """RAG_AGENT node topK parameter is extracted into WDF config."""
+        parameters = {
+            'agentId': str(uuid4()),
+            'knowledgeBasesOverride': [str(uuid4())],
+            'topK': 10,
+            'type': 'rag_agent',
+            'label': 'x',
+            'function_name': 'x',
+            'collapsed': False,
+            'validationLevel': 'ok',
+            'validationMessages': [],
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert result['topK'] == 10
+
+    def test_rag_agent_system_prompt_extracted(self):
+        """RAG_AGENT node systemPrompt parameter maps to system_prompt in WDF config."""
+        parameters = {
+            'agentId': str(uuid4()),
+            'knowledgeBasesOverride': [str(uuid4())],
+            'topK': 10,
+            'systemPrompt': 'Be concise',
+            'type': 'rag_agent',
+            'label': 'x',
+            'function_name': 'x',
+            'collapsed': False,
+            'validationLevel': 'ok',
+            'validationMessages': [],
+        }
+        result = extract_node_config('RAG_AGENT', parameters, {})
+        assert result['system_prompt'] == 'Be concise'
+        assert 'systemPrompt' not in result
+
+    def test_structured_output_system_prompt_extracted(self):
+        """STRUCTURED_OUTPUT node systemPrompt parameter maps to system_prompt."""
+        parameters = {
+            'primaryInput': '{{x.output.text}}',
+            'systemPrompt': 'Extract data',
+            'type': 'structured_output',
+            'label': 'x',
+            'function_name': 'x',
+            'collapsed': False,
+            'validationLevel': 'ok',
+            'validationMessages': [],
+        }
+        config = {'schema': {'type': 'object'}}
+        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
+        assert result['system_prompt'] == 'Extract data'
+        assert 'systemPrompt' not in result
+
+    def test_timeout_seconds_non_default_preserved(self):
+        """Non-default timeout_seconds (!=30) is preserved on pulled NodeDefinition."""
+        input_uuid = uuid4()
+        agent_uuid = uuid4()
+
+        workflow = SimpleNamespace(
+            id=WORKFLOW_ID,
+            version=1,
+            entry_point=input_uuid,
+            exit_point=agent_uuid,
+            state_schema={},
+            organization_id=ORG_ID,
+        )
+        metadata = SimpleNamespace(name='Test', description='', tags=[])
+        nodes = [
+            SimpleNamespace(
+                id=input_uuid,
+                config_type='PLAIN_TXT_INPUT',
+                execution_mode='INPUT',
+                function_name='input_1',
+                parameters={},
+                config={},
+                timeout_seconds=30,
+            ),
+            SimpleNamespace(
+                id=agent_uuid,
+                config_type='AGENT',
+                execution_mode='MESSAGES',
+                function_name='agent_1',
+                parameters={'model': 'gpt-4'},
+                config={},
+                timeout_seconds=60,
+            ),
+        ]
+        edges = [
+            SimpleNamespace(
+                id=uuid4(),
+                edge_type='STATIC',
+                condition_function=None,
+                source_node_id=input_uuid,
+                target_node_id=agent_uuid,
+            ),
+        ]
+
+        wdf, _, _ = api_response_to_wdf(workflow, metadata, nodes, edges, {}, {})
+        agent_node = wdf.nodes['agent_1']
+        assert agent_node.timeout_seconds == 60
+
+    def test_timeout_seconds_default_30_omitted(self):
+        """Default timeout_seconds (30) results in None on pulled NodeDefinition."""
+        input_uuid = uuid4()
+
+        workflow = SimpleNamespace(
+            id=WORKFLOW_ID,
+            version=1,
+            entry_point=input_uuid,
+            exit_point=input_uuid,
+            state_schema={},
+            organization_id=ORG_ID,
+        )
+        metadata = SimpleNamespace(name='Test', description='', tags=[])
+        nodes = [
+            SimpleNamespace(
+                id=input_uuid,
+                config_type='PLAIN_TXT_INPUT',
+                execution_mode='INPUT',
+                function_name='input_1',
+                parameters={},
+                config={},
+                timeout_seconds=30,
+            ),
+        ]
+
+        wdf, _, _ = api_response_to_wdf(workflow, metadata, nodes, [], {}, {})
+        node = wdf.nodes['input_1']
+        assert node.timeout_seconds is None
