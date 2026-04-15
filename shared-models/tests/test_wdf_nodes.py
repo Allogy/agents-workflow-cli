@@ -703,3 +703,101 @@ class TestNodeDefinition:
                 config={},
             )
             assert node.execution_mode == mode
+
+
+class TestDeadFieldRejection:
+    """Verify that all 6 dead fields are actively rejected with clear error messages."""
+
+    def test_topP_rejected_on_llm_call(self):
+        """topP is a dead field on LLM_CALL and should be rejected."""
+        with pytest.raises(ValidationError, match='topP'):
+            LlmCallConfig.model_validate(
+                {
+                    'model': 'test-model',
+                    'template': 'test',
+                    'topP': 0.9,
+                }
+            )
+
+    def test_extractionPrompt_rejected_on_structured_output(self):
+        """extractionPrompt is a dead field on STRUCTURED_OUTPUT and should be rejected."""
+        with pytest.raises(ValidationError, match='extractionPrompt'):
+            StructuredOutputConfig.model_validate(
+                {
+                    'schema': {'type': 'object'},
+                    'extractionPrompt': 'Extract data',
+                }
+            )
+
+    def test_disableRAG_rejected_on_rag_agent(self):
+        """disableRAG is a dead field on RAG_AGENT and should be rejected."""
+        with pytest.raises(ValidationError, match='disableRAG'):
+            RagAgentConfig.model_validate(
+                {
+                    'agentId': 'test-id',
+                    'knowledgeBaseIds': ['kb1'],
+                    'disableRAG': True,
+                }
+            )
+
+    def test_textExtraction_rejected_on_file_upload(self):
+        """textExtraction is a dead field on FILE_UPLOAD and should be rejected."""
+        with pytest.raises(ValidationError, match='textExtraction'):
+            FileUploadConfig.model_validate(
+                {
+                    'acceptedFormats': ['pdf'],
+                    'maxFileSize': 10,
+                    'textExtraction': 'ocr',
+                }
+            )
+
+    def test_extractTables_rejected_on_file_upload(self):
+        """extractTables is a dead field on FILE_UPLOAD and should be rejected."""
+        with pytest.raises(ValidationError, match='extractTables'):
+            FileUploadConfig.model_validate(
+                {
+                    'acceptedFormats': ['pdf'],
+                    'maxFileSize': 10,
+                    'extractTables': True,
+                }
+            )
+
+    def test_preserveFormatting_rejected_on_file_upload(self):
+        """preserveFormatting is a dead field on FILE_UPLOAD and should be rejected."""
+        with pytest.raises(ValidationError, match='preserveFormatting'):
+            FileUploadConfig.model_validate(
+                {
+                    'acceptedFormats': ['pdf'],
+                    'maxFileSize': 10,
+                    'preserveFormatting': True,
+                }
+            )
+
+    def test_extractTables_still_valid_on_document_extraction(self):
+        """extractTables is legitimate on DOCUMENT_EXTRACTION, not dead."""
+        config = DocumentExtractionConfig.model_validate({'extractTables': True})
+        assert config.extractTables is True
+
+    def test_multiple_dead_fields_rejected_together(self):
+        """Multiple dead fields in one config are all reported."""
+        with pytest.raises(
+            ValidationError, match='extractTables.*textExtraction|textExtraction.*extractTables'
+        ):
+            FileUploadConfig.model_validate(
+                {
+                    'acceptedFormats': ['pdf'],
+                    'maxFileSize': 10,
+                    'textExtraction': 'ocr',
+                    'extractTables': True,
+                }
+            )
+
+    def test_schema_required_on_structured_output(self):
+        """StructuredOutputConfig requires schema field."""
+        with pytest.raises(ValidationError, match='schema'):
+            StructuredOutputConfig.model_validate({})
+
+    def test_schema_provided_succeeds(self):
+        """StructuredOutputConfig works when schema is provided."""
+        config = StructuredOutputConfig.model_validate({'schema': {'type': 'object'}})
+        assert config.schema_ == {'type': 'object'}
