@@ -128,7 +128,7 @@ class TestFileUploadConfig:
 
 
 class TestAgentConfig:
-    """AGENT: all fields optional; temperature, maxTokens, tools, agentId, primaryInput."""
+    """AGENT: all fields optional; temperature, maxTokens, tools, agentId, primaryInput, system_prompt."""
 
     def test_valid_minimal(self):
         config = AgentConfig()
@@ -138,6 +138,14 @@ class TestAgentConfig:
         assert config.tools is None
         assert config.agentId is None
         assert config.primaryInput is None
+
+    def test_system_prompt_accepted(self):
+        config = AgentConfig(system_prompt='You are helpful')
+        assert config.system_prompt == 'You are helpful'
+
+    def test_system_prompt_defaults_to_none(self):
+        config = AgentConfig()
+        assert config.system_prompt is None
 
     def test_valid_full_config(self):
         config = AgentConfig(
@@ -239,6 +247,24 @@ class TestRagAgentConfig:
         assert config.agent_name == 'OpenAI Test Agent'
         assert config.knowledge_base_names == ['standards']
         assert config.primaryInput == '{{llmprompt_1.output.text}}'
+
+    def test_topk_accepted(self):
+        config = RagAgentConfig(agent_name='x', knowledge_base_names=['kb1'], topK=10)
+        assert config.topK == 10
+
+    def test_topk_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            RagAgentConfig(agent_name='x', knowledge_base_names=['kb1'], topK=0)
+
+    def test_topk_defaults_to_none(self):
+        config = RagAgentConfig(agent_name='x', knowledge_base_names=['kb1'])
+        assert config.topK is None
+
+    def test_system_prompt_accepted(self):
+        config = RagAgentConfig(
+            agent_name='x', knowledge_base_names=['kb1'], system_prompt='Be concise'
+        )
+        assert config.system_prompt == 'Be concise'
 
     def test_no_references_at_all_raises(self):
         """Config with no agent or KB references should raise."""
@@ -375,6 +401,10 @@ class TestStructuredOutputConfig:
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
         assert config.schema_['type'] == 'object'
         assert config.primaryInput == '{{input.output.data}}'
+
+    def test_system_prompt_accepted(self):
+        config = StructuredOutputConfig(schema={'type': 'object'}, system_prompt='Extract data')
+        assert config.system_prompt == 'Extract data'
 
     def test_defaults_are_none(self):
         """Optional fields default to None."""
@@ -676,6 +706,39 @@ class TestNodeDefinition:
                 config={},
             )
             assert node.execution_mode == mode
+
+    def test_timeout_seconds_accepted(self):
+        node = NodeDefinition(
+            type='agent',
+            execution_mode='MESSAGES',
+            config={},
+            timeout_seconds=60,
+        )
+        assert node.timeout_seconds == 60
+
+    def test_timeout_seconds_defaults_to_none(self):
+        node = NodeDefinition(
+            type='agent',
+            execution_mode='MESSAGES',
+            config={},
+        )
+        assert node.timeout_seconds is None
+
+    def test_timeout_seconds_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            NodeDefinition(
+                type='agent',
+                execution_mode='MESSAGES',
+                config={},
+                timeout_seconds=0,
+            )
+        with pytest.raises(ValidationError):
+            NodeDefinition(
+                type='agent',
+                execution_mode='MESSAGES',
+                config={},
+                timeout_seconds=-5,
+            )
 
 
 class TestDeadFieldRejection:

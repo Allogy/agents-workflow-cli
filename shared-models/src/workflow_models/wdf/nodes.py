@@ -118,6 +118,7 @@ class AgentConfig(BaseModel):
     tools: list[Any] | None = None
     agentId: str | None = None
     primaryInput: str | None = None
+    system_prompt: str | None = None
 
 
 class RagAgentConfig(BaseModel):
@@ -138,6 +139,8 @@ class RagAgentConfig(BaseModel):
     agent_name: str | None = None
     knowledge_base_names: list[str] | None = None
     primaryInput: str | None = None
+    topK: int | None = Field(default=None, gt=0)
+    system_prompt: str | None = None
 
     @model_validator(mode='before')
     @classmethod
@@ -194,6 +197,7 @@ class StructuredOutputConfig(BaseModel):
     schema_: dict[str, Any] = Field(..., alias='schema')
     model: str | None = None
     primaryInput: str | None = None
+    system_prompt: str | None = None
 
     model_config = {'populate_by_name': True}
 
@@ -316,6 +320,7 @@ class NodeDefinition(BaseModel):
     execution_mode: str
     label: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: int | None = Field(default=None, gt=0)
 
     # Populated after validation — the parsed, typed config object.
     parsed_config: BaseModel | None = Field(default=None, exclude=True)
