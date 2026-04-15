@@ -19,6 +19,8 @@ from cli.commands.push import (
     resolve_dependencies,
     wdf_to_api_payload,
 )
+from cli.contract import ContractError
+from cli.registry import RegistryResult
 
 # --- Test Fixtures ---
 
@@ -1564,3 +1566,198 @@ exit: agent
 
         with pytest.raises(PushError, match='Nonexistent Agent'):
             push_workflow(yaml_with_agent, config)
+
+
+class TestContractValidation:
+    """Tests for contract validation in push flow (CTR-01, CTR-03)."""
+
+    @pytest.fixture
+    def workflow_yaml(self, tmp_path: Path) -> Path:
+        """Create a minimal workflow YAML for testing push_workflow."""
+        yaml_content = """\
+name: Test Workflow
+version: 1
+entry: input
+exit: llm
+
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: User Input
+    config:
+      placeholder: Enter text
+
+  llm:
+    type: llm_call
+    execution_mode: MESSAGES
+    label: LLM Call
+    config:
+      model: anthropic.claude-3-5-sonnet-20241022-v2:0
+      system_prompt: You are helpful
+      temperature: 0.7
+      maxTokens: 1024
+      template: "{{input.output.text}}"
+
+edges:
+  - from: input
+    to: llm
+"""
+        yaml_file = tmp_path / 'test.workflow.yaml'
+        yaml_file.write_text(yaml_content)
+        return yaml_file
+
+    @patch('cli.commands.push.WorkflowClient')
+    @patch('cli.commands.push.validate_contract')
+    @patch('cli.commands.push.get_registry')
+    def test_push_blocks_on_contract_errors(
+        self, mock_get_registry, mock_validate_contract, mock_client_class, workflow_yaml
+    ):
+        """CTR-01: Push raises PushError when contract validation finds errors."""
+        mock_get_registry.return_value = RegistryResult(registry={'all_node_types': {}})
+        mock_validate_contract.return_value = [
+            ContractError(
+                node_slug='llm',
+                node_type='LLM_CALL',
+                field='temperature',
+                message='not of type number',
+            ),
+        ]
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        with pytest.raises(PushError, match='Contract validation failed'):
+            push_workflow(workflow_yaml, config)
+
+        mock_validate_contract.assert_called_once()
+        mock_get_registry.assert_called_once()
+
+    @patch('cli.commands.push.WorkflowClient')
+    @patch('cli.commands.push.validate_contract')
+    @patch('cli.commands.push.get_registry')
+    def test_push_proceeds_on_valid_contract(
+        self, mock_get_registry, mock_validate_contract, mock_client_class, workflow_yaml
+    ):
+        """CTR-01: Push proceeds when contract validation passes."""
+        mock_get_registry.return_value = RegistryResult(registry={'all_node_types': {}})
+        mock_validate_contract.return_value = []
+
+        # Setup mock client for dependency resolution
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.list_agents.return_value = []
+        mock_client.list_knowledge_bases.return_value = []
+
+        # Save complete workflow will be called (meaning contract validation passed)
+        mock_response = MagicMock()
+        mock_response.workflow.id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.workflow.organization_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        # Should not raise — contract validation passes
+        push_workflow(workflow_yaml, config)
+
+        mock_validate_contract.assert_called_once()
+        mock_client.save_complete_workflow.assert_called_once()
+
+    @patch('cli.commands.push.WorkflowClient')
+    @patch('cli.commands.push.validate_contract')
+    @patch('cli.commands.push.get_registry')
+    def test_push_skips_contract_with_flag(
+        self, mock_get_registry, mock_validate_contract, mock_client_class, workflow_yaml
+    ):
+        """CTR-03: --skip-contract-check bypasses contract validation."""
+        # Setup mock client for dependency resolution
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.list_agents.return_value = []
+        mock_client.list_knowledge_bases.return_value = []
+
+        mock_response = MagicMock()
+        mock_response.workflow.id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.workflow.organization_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        push_workflow(workflow_yaml, config, skip_contract_check=True)
+
+        mock_validate_contract.assert_not_called()
+        mock_get_registry.assert_not_called()
+
+    @patch('cli.commands.push.WorkflowClient')
+    @patch('cli.commands.push.get_registry')
+    def test_push_skips_contract_when_registry_unavailable(
+        self, mock_get_registry, mock_client_class, workflow_yaml
+    ):
+        """CTR-01: Push proceeds with warning when registry unavailable."""
+        mock_get_registry.return_value = None
+
+        # Setup mock client for dependency resolution
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.list_agents.return_value = []
+        mock_client.list_knowledge_bases.return_value = []
+
+        mock_response = MagicMock()
+        mock_response.workflow.id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.workflow.organization_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        # Should not raise — push proceeds when registry unavailable
+        push_workflow(workflow_yaml, config)
+
+        mock_get_registry.assert_called_once()
+
+    @patch('cli.commands.push.WorkflowClient')
+    @patch('cli.commands.push.validate_contract')
+    @patch('cli.commands.push.get_registry')
+    def test_push_validates_with_stale_registry(
+        self, mock_get_registry, mock_validate_contract, mock_client_class, workflow_yaml
+    ):
+        """Push still runs contract validation with stale cache."""
+        mock_get_registry.return_value = RegistryResult(
+            registry={'all_node_types': {}}, is_stale=True
+        )
+        mock_validate_contract.return_value = []
+
+        # Setup mock client for dependency resolution
+        mock_client = MagicMock()
+        mock_client_class.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_class.from_config.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.list_agents.return_value = []
+        mock_client.list_knowledge_bases.return_value = []
+
+        mock_response = MagicMock()
+        mock_response.workflow.id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.workflow.organization_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        mock_response.edges = []
+        mock_client.save_complete_workflow.return_value = mock_response
+
+        config = MagicMock()
+        config.host = 'https://api.example.com'
+        config.org_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+        push_workflow(workflow_yaml, config)
+
+        # Contract validation should still be called with stale registry
+        mock_validate_contract.assert_called_once()
+        mock_get_registry.assert_called_once()
