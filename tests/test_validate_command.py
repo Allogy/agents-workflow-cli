@@ -38,7 +38,10 @@ nodes:
   output:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
 edges:
   - from: input
     to: process
@@ -130,7 +133,10 @@ nodes:
   exit:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
   orphan:
     type: llm_call
     execution_mode: MESSAGES
@@ -239,7 +245,10 @@ nodes:
   output:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
 edges:
   - from: input
     to: extract
@@ -273,7 +282,10 @@ nodes:
   output:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
 edges:
   - from: input
     to: process
@@ -354,7 +366,10 @@ nodes:
   exit:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
   orphan:
     type: llm_call
     execution_mode: MESSAGES

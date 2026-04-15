@@ -66,7 +66,6 @@ nodes:
     config:
       acceptedFormats: [pdf, png, jpg]
       maxFileSize: 10485760
-      textExtraction: automatic
   extract:
     type: document_extraction
     execution_mode: FLOW
@@ -210,7 +209,6 @@ nodes:
         - pdf
         - png
       maxFileSize: 10485760
-      textExtraction: automatic
   extract:
     type: document_extraction
     execution_mode: FLOW

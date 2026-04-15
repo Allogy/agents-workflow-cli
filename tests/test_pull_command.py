@@ -1280,8 +1280,6 @@ class TestExtractNodeConfig:
             'label': 'File Upload 1',
             'acceptedFormats': ['pdf', 'docx', 'txt'],
             'maxFileSize': 10,
-            'extractText': True,
-            'textExtraction': 'automatic',
             'function_name': 'fileUpload_1',
             'collapsed': False,
         }
@@ -1289,8 +1287,9 @@ class TestExtractNodeConfig:
         result = extract_node_config('FILE_UPLOAD', parameters, config)
         assert result['acceptedFormats'] == ['pdf', 'docx', 'txt']
         assert result['maxFileSize'] == 10
-        assert result['textExtraction'] == 'automatic'
-        assert result['extractText'] is True
+        # Dead fields should not be extracted
+        assert 'textExtraction' not in result
+        assert 'extractText' not in result
         # UI-only fields should not be in result
         assert 'type' not in result
         assert 'collapsed' not in result
@@ -1307,7 +1306,6 @@ class TestExtractNodeConfig:
             'agentId': agent_id,
             'primaryInput': '{{plainTextInput_1.output.text}}',
             'knowledgeBasesOverride': [kb_id],
-            'disableRAG': False,
             'function_name': 'ragAgent_1',
             'collapsed': False,
         }
@@ -1316,7 +1314,7 @@ class TestExtractNodeConfig:
         assert result['agentId'] == agent_id
         assert result['knowledgeBaseIds'] == [kb_id]  # knowledgeBasesOverride -> knowledgeBaseIds
         assert result['primaryInput'] == '{{plainTextInput_1.output.text}}'
-        assert result['disableRAG'] is False
+        assert 'disableRAG' not in result
 
     def test_llm_call_from_parameters(self):
         """Test extracting LLM_CALL config from parameters."""
@@ -1401,19 +1399,6 @@ class TestExtractNodeConfig:
         result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
         assert result['schema'] == config['schema']
 
-    def test_structured_output_with_extraction_prompt(self):
-        """Test extracting extractionPrompt from parameters for STRUCTURED_OUTPUT."""
-        parameters = {
-            'type': 'structuredOutput',
-            'label': 'Results',
-            'function_name': 'results',
-            'extractionPrompt': 'Extract the key findings.',
-        }
-        config = {'schema': {'type': 'object', 'properties': {}}}
-        result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
-        assert result['extractionPrompt'] == 'Extract the key findings.'
-        assert result['schema'] == config['schema']
-
     def test_structured_output_with_primary_input(self):
         """Test extracting primaryInput from parameters for STRUCTURED_OUTPUT."""
         parameters = {
@@ -1426,13 +1411,12 @@ class TestExtractNodeConfig:
         result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
         assert result['primaryInput'] == '{{form_input.output.data}}'
 
-    def test_structured_output_with_all_new_fields(self):
-        """Test extracting both extractionPrompt and primaryInput for STRUCTURED_OUTPUT."""
+    def test_structured_output_with_all_fields(self):
+        """Test extracting primaryInput and config fields for STRUCTURED_OUTPUT."""
         parameters = {
             'type': 'structuredOutput',
             'label': 'Results',
             'function_name': 'results',
-            'extractionPrompt': 'Extract findings.',
             'primaryInput': 'Context for this output node.',
         }
         config = {
@@ -1440,10 +1424,10 @@ class TestExtractNodeConfig:
             'model': 'anthropic.claude-sonnet-4-5-v2',
         }
         result = extract_node_config('STRUCTURED_OUTPUT', parameters, config)
-        assert result['extractionPrompt'] == 'Extract findings.'
         assert result['primaryInput'] == 'Context for this output node.'
         assert result['schema'] == config['schema']
         assert result['model'] == 'anthropic.claude-sonnet-4-5-v2'
+        assert 'extractionPrompt' not in result
 
     def test_retrieve_from_parameters(self):
         """Test extracting RETRIEVE config from parameters."""
@@ -1816,8 +1800,6 @@ class TestApiResponseToWdfWithParameters:
                     'label': 'File Upload 1',
                     'acceptedFormats': ['pdf', 'docx', 'txt'],
                     'maxFileSize': 10,
-                    'extractText': True,
-                    'textExtraction': 'automatic',
                     'function_name': 'fileUpload_1',
                     'collapsed': False,
                 },
@@ -1837,7 +1819,6 @@ class TestApiResponseToWdfWithParameters:
                         f'of the document  {{{{{str(file_uuid)}.output.text}}}}'
                     ),
                     'knowledgeBasesOverride': [str(kb_uuid)],
-                    'disableRAG': False,
                     'function_name': 'ragAgent_1',
                     'collapsed': False,
                 },
@@ -1891,7 +1872,6 @@ class TestApiResponseToWdfWithParameters:
         assert file_node.label == 'File Upload 1'
         assert file_node.config['acceptedFormats'] == ['pdf', 'docx', 'txt']
         assert file_node.config['maxFileSize'] == 10
-        assert file_node.config['textExtraction'] == 'automatic'
 
         # --- Verify RAG_AGENT node ---
         rag_node = wdf.nodes['ragagent_1']

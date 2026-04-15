@@ -21,8 +21,6 @@ nodes:
         - docx
         - txt
       maxFileSize: 10485760
-      textExtraction: automatic
-      extractTables: true
 
   retrieve:
     type: retrieve

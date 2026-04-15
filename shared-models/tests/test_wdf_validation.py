@@ -33,7 +33,11 @@ class TestReachabilityAnalysis:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'c': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'c': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'a', 'to': 'b'},
@@ -63,7 +67,11 @@ class TestReachabilityAnalysis:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'exit': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'exit': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'entry', 'to': 'process'},
@@ -85,7 +93,11 @@ class TestReachabilityAnalysis:
             name='Exit Unreachable',
             nodes={
                 'entry': {'type': 'plain_txt_input', 'execution_mode': 'INPUT', 'config': {}},
-                'exit': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'exit': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 # No edge from entry to exit, but Pydantic won't catch this
@@ -113,7 +125,11 @@ class TestReachabilityAnalysis:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'd': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'd': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'a', 'to': 'b'},
@@ -161,7 +177,11 @@ class TestCycleDetection:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'c': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'c': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'a', 'to': 'b'},
@@ -238,7 +258,11 @@ class TestCycleDetection:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'c': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'c': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'a', 'to': 'b'},
@@ -284,7 +308,11 @@ class TestCycleDetection:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'test'},
                 },
-                'd': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'd': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'a', 'to': 'b'},
@@ -322,7 +350,11 @@ class TestVariableReferenceValidation:
                     'execution_mode': 'MESSAGES',
                     'config': {'model': 'test', 'template': 'Process: {{input.output.text}}'},
                 },
-                'output': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'output': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[
                 {'from': 'input', 'to': 'process'},
@@ -418,7 +450,11 @@ class TestVariableReferenceValidation:
             name='No Refs',
             nodes={
                 'input': {'type': 'plain_txt_input', 'execution_mode': 'INPUT', 'config': {}},
-                'output': {'type': 'structured_output', 'execution_mode': 'OUTPUT', 'config': {}},
+                'output': {
+                    'type': 'structured_output',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'schema': {'type': 'object', 'properties': {}}},
+                },
             },
             edges=[{'from': 'input', 'to': 'output'}],
             entry='input',

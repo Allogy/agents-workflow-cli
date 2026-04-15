@@ -85,19 +85,15 @@ class TestStructuredInputConfig:
 
 
 class TestFileUploadConfig:
-    """FILE_UPLOAD: acceptedFormats, maxFileSize (required); textExtraction, extractTables (optional)."""
+    """FILE_UPLOAD: acceptedFormats, maxFileSize (required)."""
 
     def test_valid_full_config(self):
         config = FileUploadConfig(
             acceptedFormats=['pdf', 'png', 'jpg'],
             maxFileSize=10485760,
-            textExtraction='automatic',
-            extractTables=True,
         )
         assert config.acceptedFormats == ['pdf', 'png', 'jpg']
         assert config.maxFileSize == 10485760
-        assert config.textExtraction == 'automatic'
-        assert config.extractTables is True
 
     def test_minimal_required_fields(self):
         config = FileUploadConfig(
@@ -106,9 +102,6 @@ class TestFileUploadConfig:
         )
         assert config.acceptedFormats == ['pdf']
         assert config.maxFileSize == 5242880
-        assert config.textExtraction is None
-        assert config.extractTables is None
-        assert config.preserveFormatting is None
 
     def test_missing_accepted_formats_raises(self):
         with pytest.raises(ValidationError) as exc_info:
@@ -212,29 +205,6 @@ class TestRagAgentConfig:
         with pytest.raises(ValidationError):
             RagAgentConfig(agentId='kb-agent')
 
-    def test_with_disable_rag_true(self):
-        config = RagAgentConfig(
-            agentId='kb-agent',
-            knowledgeBaseIds=['kb-1'],
-            disableRAG=True,
-        )
-        assert config.disableRAG is True
-
-    def test_with_disable_rag_false(self):
-        config = RagAgentConfig(
-            agentId='kb-agent',
-            knowledgeBaseIds=['kb-1'],
-            disableRAG=False,
-        )
-        assert config.disableRAG is False
-
-    def test_disable_rag_defaults_to_none(self):
-        config = RagAgentConfig(
-            agentId='kb-agent',
-            knowledgeBaseIds=['kb-1'],
-        )
-        assert config.disableRAG is None
-
     def test_knowledge_base_ids_must_be_list(self):
         with pytest.raises(ValidationError):
             RagAgentConfig(agentId='agent', knowledgeBaseIds='kb-1')  # type: ignore[arg-type]
@@ -265,12 +235,10 @@ class TestRagAgentConfig:
             agent_name='OpenAI Test Agent',
             knowledge_base_names=['standards'],
             primaryInput='{{llmprompt_1.output.text}}',
-            disableRAG=False,
         )
         assert config.agent_name == 'OpenAI Test Agent'
         assert config.knowledge_base_names == ['standards']
         assert config.primaryInput == '{{llmprompt_1.output.text}}'
-        assert config.disableRAG is False
 
     def test_no_references_at_all_raises(self):
         """Config with no agent or KB references should raise."""
@@ -284,7 +252,7 @@ class TestRagAgentConfig:
 
 
 class TestLlmCallConfig:
-    """LLM_CALL: model, template (required); system_prompt, temperature, maxTokens, topP (optional)."""
+    """LLM_CALL: model, template (required); system_prompt, temperature, maxTokens (optional)."""
 
     def test_valid_minimal(self):
         config = LlmCallConfig(
@@ -296,20 +264,17 @@ class TestLlmCallConfig:
         assert config.system_prompt is None
         assert config.temperature is None
         assert config.maxTokens is None
-        assert config.topP is None
 
     def test_valid_full_config(self):
         config = LlmCallConfig(
             model='anthropic.claude-sonnet-4-5-v2',
             temperature=0.3,
             maxTokens=2048,
-            topP=0.9,
             template='Classify: {{extract.output.extractedData}}',
             system_prompt='You are a helpful assistant.',
         )
         assert config.temperature == 0.3
         assert config.maxTokens == 2048
-        assert config.topP == 0.9
         assert config.system_prompt == 'You are a helpful assistant.'
 
     def test_missing_model_raises(self):
@@ -338,13 +303,16 @@ class TestLlmCallConfig:
         with pytest.raises(ValidationError):
             LlmCallConfig(model='test', template='test', maxTokens=0)
 
-    def test_top_p_range(self):
-        """topP should be between 0 and 1."""
-        with pytest.raises(ValidationError):
-            LlmCallConfig(model='test', template='test', topP=-0.1)
-
-        with pytest.raises(ValidationError):
-            LlmCallConfig(model='test', template='test', topP=1.1)
+    def test_top_p_rejected_as_dead_field(self):
+        """topP is a dead field and should be rejected."""
+        with pytest.raises(ValidationError, match='topP'):
+            LlmCallConfig.model_validate(
+                {
+                    'model': 'test',
+                    'template': 'test',
+                    'topP': 0.5,
+                }
+            )
 
 
 # ============================================
@@ -353,13 +321,12 @@ class TestLlmCallConfig:
 
 
 class TestStructuredOutputConfig:
-    """STRUCTURED_OUTPUT: schema (JSON Schema, optional), model (optional)."""
+    """STRUCTURED_OUTPUT: schema (JSON Schema, required), model (optional)."""
 
-    def test_empty_config_valid(self):
-        """All fields are optional."""
-        config = StructuredOutputConfig()
-        assert config.schema_ is None
-        assert config.model is None
+    def test_missing_schema_raises(self):
+        """StructuredOutputConfig requires schema field."""
+        with pytest.raises(ValidationError, match='schema'):
+            StructuredOutputConfig.model_validate({})
 
     def test_with_schema(self):
         config = StructuredOutputConfig(
@@ -375,38 +342,44 @@ class TestStructuredOutputConfig:
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
         assert config.schema_['type'] == 'object'
 
-    def test_with_extraction_prompt(self):
-        """extractionPrompt is accepted as optional field."""
-        config = StructuredOutputConfig(extractionPrompt='Extract the key findings.')
-        assert config.extractionPrompt == 'Extract the key findings.'
-        assert config.primaryInput is None
+    def test_extraction_prompt_rejected(self):
+        """extractionPrompt is a dead field and should be rejected."""
+        with pytest.raises(ValidationError, match='extractionPrompt'):
+            StructuredOutputConfig.model_validate(
+                {
+                    'schema': {'type': 'object'},
+                    'extractionPrompt': 'Extract data',
+                }
+            )
 
     def test_with_primary_input(self):
         """primaryInput is accepted as optional field."""
-        config = StructuredOutputConfig(primaryInput='{{form.output.text}}')
+        config = StructuredOutputConfig.model_validate(
+            {
+                'schema': {'type': 'object'},
+                'primaryInput': '{{form.output.text}}',
+            }
+        )
         assert config.primaryInput == '{{form.output.text}}'
-        assert config.extractionPrompt is None
 
     def test_full_config(self):
-        """All fields together."""
+        """All fields together (minus dead extractionPrompt)."""
         config = StructuredOutputConfig(
             model='anthropic.claude-sonnet-4-5-v2',
             schema={
                 'type': 'object',
                 'properties': {'result': {'type': 'string'}},
             },
-            extractionPrompt='Extract the result.',
             primaryInput='{{input.output.data}}',
         )
         assert config.model == 'anthropic.claude-sonnet-4-5-v2'
         assert config.schema_['type'] == 'object'
-        assert config.extractionPrompt == 'Extract the result.'
         assert config.primaryInput == '{{input.output.data}}'
 
     def test_defaults_are_none(self):
-        """New fields default to None."""
-        config = StructuredOutputConfig()
-        assert config.extractionPrompt is None
+        """Optional fields default to None."""
+        config = StructuredOutputConfig.model_validate({'schema': {'type': 'object'}})
+        assert config.model is None
         assert config.primaryInput is None
 
 
@@ -684,7 +657,7 @@ class TestNodeDefinition:
                 {'agentId': 'test-agent', 'knowledgeBaseIds': ['kb-1']},
             ),
             ('llm_call', 'MESSAGES', {'model': 'test', 'template': 'test'}),
-            ('structured_output', 'OUTPUT', {}),
+            ('structured_output', 'OUTPUT', {'schema': {'type': 'object', 'properties': {}}}),
             ('retrieve', 'FLOW', {'knowledgeBaseId': 'kb-1'}),
             ('document_extraction', 'FLOW', {}),
             ('human_review', 'FLOW', {}),
