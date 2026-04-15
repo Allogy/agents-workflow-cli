@@ -168,11 +168,14 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'primaryInput': None,
         'temperature': None,
         'maxTokens': None,
+        'systemPrompt': 'system_prompt',
     },
     'RAG_AGENT': {
         'agentId': None,
         'knowledgeBasesOverride': 'knowledgeBaseIds',
         'primaryInput': None,
+        'topK': None,
+        'systemPrompt': 'system_prompt',
     },
     'LLM_CALL': {
         'model': None,
@@ -194,6 +197,7 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     'STRUCTURED_OUTPUT': {
         # schema lives in config, not parameters
         'primaryInput': None,
+        'systemPrompt': 'system_prompt',
     },
     'HUMAN_REVIEW': {
         'instructions': 'review_prompt',
@@ -741,6 +745,10 @@ def api_response_to_wdf(
         # --- Extract label from parameters ---
         label = parameters.get('label') if parameters else None
 
+        # Only include timeout_seconds in WDF if it differs from the default (30)
+        timeout_val = getattr(node, 'timeout_seconds', 30)
+        timeout_kwarg = timeout_val if timeout_val != 30 else None
+
         # Build NodeDefinition — use model_construct to bypass validation
         # since agent_name / knowledge_base_name are CLI-only fields
         node_def = NodeDefinition.model_construct(
@@ -748,6 +756,7 @@ def api_response_to_wdf(
             execution_mode=execution_mode,
             label=label,
             config=config,
+            timeout_seconds=timeout_kwarg,
         )
         wdf_nodes[slug] = node_def
 
