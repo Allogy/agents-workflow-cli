@@ -228,7 +228,7 @@ from cli.client import WorkflowClient
 
 # Direct construction
 with WorkflowClient(
-    host="https://api.example.com",
+    host="https://api.sb.allogy.com",
     api_key="your-api-key",
     org_id="your-org-id",
 ) as client:
@@ -381,7 +381,7 @@ base name but `.lock` extension. For example, `my-workflow.workflow.yaml` genera
 workflow_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
 organization_id: 9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d
 version: 1
-instance: https://api.example.com
+instance: https://api.sb.allogy.com
 nodes:
   upload: a1b2c3d4-e5f6-7890-abcd-ef1234567890
   extract: b2c3d4e5-f6a7-8901-bcde-f12345678901
@@ -419,7 +419,7 @@ lock = WorkflowLock(
     workflow_id=UUID('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
     organization_id=UUID('9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'),
     version=1,
-    instance='https://api.example.com',
+    instance='https://api.sb.allogy.com',
     pushed_at=datetime.now(UTC),
 )
 lock.set_node_uuid('upload', UUID('a1b2c3d4-e5f6-7890-abcd-ef1234567890'))

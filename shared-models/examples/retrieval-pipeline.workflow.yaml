@@ -50,7 +50,7 @@ nodes:
       maxTokens: 2048
       template: |
         Extract and organize the key content from these retrieved documents:
-        {{vector_search.output.text}}
+        {{vector_search.output.results}}
 
         Include any tables, structured data, and important details.
         Present the content in a clear, organized format.

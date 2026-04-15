@@ -13,7 +13,7 @@ Usage::
 
     from cli.client import WorkflowClient
 
-    with WorkflowClient(host="https://api.example.com", api_key="key", org_id="org") as client:
+    with WorkflowClient(host="https://api.sb.allogy.com", api_key="key", org_id="org") as client:
         workflows = client.list_workflows()
         result = client.start_workflow_temporal(workflow_id, inputs={...})
 """
@@ -147,7 +147,7 @@ class WorkflowClient:
     HTTP errors are mapped to typed exceptions via :func:`cli.exceptions.raise_for_status`.
 
     Args:
-        host: Base URL of the platform API (e.g. ``https://api.example.com``).
+        host: Base URL of the platform API (e.g. ``https://api.sb.allogy.com``).
         api_key: API key for authentication.
         org_id: Default organization ID for scoped operations.
         timeout: Request timeout in seconds (default 30).

@@ -240,7 +240,7 @@ def push(
     Examples:
         workflow push my-workflow.workflow.yaml
         workflow push --skip-contract-check my-workflow.workflow.yaml
-        workflow push --host https://api.example.com --api-key xxx workflow.yaml
+        workflow push --host https://api.sb.allogy.com --api-key xxx workflow.yaml
     """
     config = get_config()
     try:
@@ -284,7 +284,7 @@ def pull(
         workflow pull abc123-def456-...
         workflow pull abc123 -o invoices.workflow.yaml
         workflow pull "Invoice Processing"
-        workflow pull "Invoice" --host https://api.example.com --api-key xxx
+        workflow pull "Invoice" --host https://api.sb.allogy.com --api-key xxx
     """
     config = get_config()
     try:

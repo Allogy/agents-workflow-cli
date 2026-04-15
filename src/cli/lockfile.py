@@ -9,7 +9,7 @@ Lockfile format (.workflow.lock):
     workflow_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
     organization_id: 9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d
     version: 1
-    instance: https://api.example.com
+    instance: https://api.sb.allogy.com
     nodes:
       upload: a1b2c3d4-e5f6-7890-abcd-ef1234567890
       extract: b2c3d4e5-f6a7-8901-bcde-f12345678901
@@ -42,7 +42,7 @@ class WorkflowLock(BaseModel):
     workflow_id: UUID = Field(..., description='Server-side workflow UUID')
     organization_id: UUID = Field(..., description='Organization UUID')
     version: int = Field(default=LOCKFILE_VERSION, description='Lockfile schema version')
-    instance: str = Field(..., description='API host URL (e.g., https://api.example.com)')
+    instance: str = Field(..., description='API host URL (e.g., https://api.sb.allogy.com)')
     nodes: dict[str, UUID] = Field(
         default_factory=dict, description='Mapping of node slug to server-side UUID'
     )

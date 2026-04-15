@@ -139,7 +139,7 @@ The pull command writes a `.workflow.lock` file alongside the YAML, enabling sub
 workflow_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 organization_id: 11111111-2222-3333-4444-555555555555
 version: 1
-instance: https://app.allogy.com
+instance: https://api.sb.allogy.com
 nodes:
   user-input: 22222222-3333-4444-5555-666666666666
   invoice-agent: 33333333-4444-5555-6666-777777777777
@@ -158,7 +158,7 @@ The pull command requires CLI configuration (same as other commands):
 
 **Environment variables:**
 ```bash
-export WORKFLOW_API_HOST=https://app.allogy.com
+export WORKFLOW_API_HOST=https://api.sb.allogy.com
 export WORKFLOW_API_KEY=your-api-key
 export WORKFLOW_ORG_ID=your-org-uuid
 ```
@@ -166,7 +166,7 @@ export WORKFLOW_ORG_ID=your-org-uuid
 **Or CLI flags:**
 ```bash
 workflow pull abc123 \
-  --host https://app.allogy.com \
+  --host https://api.sb.allogy.com \
   --api-key your-api-key \
   --org your-org-uuid
 ```
@@ -219,7 +219,7 @@ workflow pull "Invoice Processing"
 ```bash
 # 1. Pull workflow from staging
 workflow pull "Customer Support" -o support.workflow.yaml \
-  --host https://staging.api.example.com
+  --host https://stage.sb.allogy.com
 
 # 2. Edit locally
 vim support.workflow.yaml
@@ -231,7 +231,7 @@ workflow validate support.workflow.yaml
 workflow push support.workflow.yaml
 
 # Or push to production
-workflow push support.workflow.yaml --host https://prod.api.example.com
+workflow push support.workflow.yaml --host https://api.sb.allogy.com
 ```
 
 ## Error Handling

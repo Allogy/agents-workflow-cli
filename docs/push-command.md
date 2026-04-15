@@ -53,7 +53,7 @@ The lockfile enables idempotent push operations by tracking:
 version: 1
 workflow_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 organization_id: 11111111-2222-3333-4444-555555555555
-instance: https://app.allogy.com
+instance: https://api.sb.allogy.com
 pushed_at: '2025-02-18T10:30:45.123456Z'
 nodes:
   input: 22222222-3333-4444-5555-666666666666
@@ -302,14 +302,14 @@ The push command requires CLI configuration (same as other commands):
 
 **Environment variables:**
 ```bash
-export WORKFLOW_API_HOST=https://app.allogy.com
+export WORKFLOW_API_HOST=https://api.sb.allogy.com
 export WORKFLOW_API_KEY=your-api-key
 export WORKFLOW_ORG_ID=your-org-uuid
 ```
 
 **Or config file (`~/.workflow/config.yaml`):**
 ```yaml
-host: https://app.allogy.com
+host: https://api.sb.allogy.com
 api_key: your-api-key
 org_id: your-org-uuid
 ```
@@ -317,7 +317,7 @@ org_id: your-org-uuid
 **Or CLI flags:**
 ```bash
 workflow push my-workflow.workflow.yaml \
-  --host https://app.allogy.com \
+  --host https://api.sb.allogy.com \
   --api-key your-api-key \
   --org your-org-uuid
 ```
