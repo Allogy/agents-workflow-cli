@@ -1,4 +1,4 @@
-"""Validation runner that orchestrates all 11 workflow validation checks.
+"""Validation runner that orchestrates all 13 workflow validation checks.
 
 Runs checks in sequence:
 1. YAML syntax parsing
@@ -10,6 +10,8 @@ Runs checks in sequence:
 9. Node config validation (part of #2)
 10. Unsupported node types (document_extraction, etc.)
 11. Output variable paths (registry-powered)
+12. Inactive node types (registry-powered)
+13. Field coverage drift (registry-powered)
 
 Returns structured CheckResult objects with PASS/FAIL/WARN/SKIP status.
 
@@ -28,6 +30,7 @@ from workflow_models.wdf.validation import (
     check_reachability,
     check_variable_references,
 )
+from workflow_models.wdf.nodes import NODE_TYPE_CONFIG_MAP
 from workflow_models.wdf.variable_ref import extract_variable_refs
 from workflow_models.wdf.workflow import WorkflowDefinition
 
@@ -38,6 +41,9 @@ UNSUPPORTED_NODE_TYPES: frozenset[str] = frozenset({'document_extraction'})
 
 # Node types where all output paths are user-defined (skip output path validation).
 _DYNAMIC_OUTPUT_TYPES: frozenset[str] = frozenset({'STRUCTURED_INPUT'})
+
+# Base fields present on every registry node type -- excluded from field coverage comparison.
+_REGISTRY_BASE_FIELDS: frozenset[str] = frozenset({'name', 'description', 'metadata'})
 
 
 class CheckStatus(str, Enum):
@@ -67,7 +73,7 @@ class CheckResult:
 
 
 def run_all_validations(yaml_str: str, *, registry: dict | None = None) -> list[CheckResult]:
-    """Run all 11 validation checks on a workflow YAML string.
+    """Run all 13 validation checks on a workflow YAML string.
 
     Args:
         yaml_str: Raw YAML content of a .workflow.yaml file.
@@ -185,6 +191,12 @@ def run_all_validations(yaml_str: str, *, registry: dict | None = None) -> list[
     # Check 11: Output Variable Paths (registry-powered)
     results.append(check_output_variable_paths(workflow, registry))
 
+    # Check 12: Inactive Node Types (registry-powered)
+    results.append(check_inactive_node_types(workflow, registry))
+
+    # Check 13: Field Coverage (registry-powered)
+    results.append(check_field_coverage(workflow, registry))
+
     # Additional synthetic checks for clearer reporting
     # (These are actually covered by WDF Schema Conformance, but we list them separately)
     results.append(CheckResult(check_name='Node Type Recognition', status=CheckStatus.PASS))
@@ -282,5 +294,139 @@ def check_output_variable_paths(
 
     return CheckResult(
         check_name='Output Variable Paths',
+        status=CheckStatus.PASS,
+    )
+
+
+def _build_status_lookup(registry: dict) -> dict[str, str]:
+    """Build node_type (UPPERCASE) -> status string from registry."""
+    return {
+        info.get('type', ''): info.get('status', 'active')
+        for info in registry.get('all_node_types', [])
+    }
+
+
+def _build_registry_fields_lookup(registry: dict) -> dict[str, set[str]]:
+    """Build node_type (UPPERCASE) -> set of field names from registry."""
+    lookup: dict[str, set[str]] = {}
+    for info in registry.get('all_node_types', []):
+        node_type = info.get('type', '')
+        fields = {f.get('name', '') for f in info.get('fields', []) if f.get('name')}
+        if fields:
+            lookup[node_type] = fields
+    return lookup
+
+
+def check_inactive_node_types(
+    workflow: WorkflowDefinition,
+    registry: dict | None,
+) -> CheckResult:
+    """Check whether any workflow nodes use inactive node types per the registry.
+
+    Returns SKIP if registry is None (offline/no cache).
+    Returns PASS if all used node types are active.
+    Returns WARN if any node uses an inactive type.
+    """
+    if registry is None:
+        return CheckResult(
+            check_name='Inactive Node Types',
+            status=CheckStatus.SKIP,
+            message='Registry unavailable -- skipping inactive node type check',
+        )
+
+    status_lookup = _build_status_lookup(registry)
+    inactive_found: list[str] = []
+
+    for slug, node_def in workflow.nodes.items():
+        registry_type = node_def.type.upper()
+        status = status_lookup.get(registry_type)
+        if status == 'inactive':
+            inactive_found.append(f'{slug} ({registry_type})')
+
+    if inactive_found:
+        return CheckResult(
+            check_name='Inactive Node Types',
+            status=CheckStatus.WARN,
+            message=f'Inactive node types: {", ".join(inactive_found)}',
+            details={'inactive_nodes': inactive_found},
+        )
+
+    return CheckResult(
+        check_name='Inactive Node Types',
+        status=CheckStatus.PASS,
+    )
+
+
+def check_field_coverage(
+    workflow: WorkflowDefinition,
+    registry: dict | None,
+) -> CheckResult:
+    """Compare CLI WDF model fields against registry fields per node type.
+
+    Surfaces:
+    - CLI-only fields: present in WDF model but not in registry.
+    - Registry-only fields: present in registry but not in WDF model
+      (base fields like name/description/metadata are excluded).
+
+    Returns SKIP if registry is None (offline/no cache).
+    Returns PASS if no drift detected.
+    Returns WARN with per-type breakdown if any drift found.
+    """
+    if registry is None:
+        return CheckResult(
+            check_name='Field Coverage',
+            status=CheckStatus.SKIP,
+            message='Registry unavailable -- skipping field coverage check',
+        )
+
+    status_lookup = _build_status_lookup(registry)
+    registry_fields_lookup = _build_registry_fields_lookup(registry)
+
+    # Collect unique WDF node types from the workflow (deduplicate)
+    seen_types: set[str] = set()
+    for _slug, node_def in workflow.nodes.items():
+        seen_types.add(node_def.type)
+
+    drift_lines: list[str] = []
+
+    for wdf_type in sorted(seen_types):
+        registry_type = wdf_type.upper()
+
+        # Skip inactive types
+        if status_lookup.get(registry_type) == 'inactive':
+            continue
+
+        # Get WDF fields from the config model
+        config_cls = NODE_TYPE_CONFIG_MAP.get(wdf_type)
+        if config_cls is None:
+            continue
+        wdf_fields = set(config_cls.model_fields.keys())
+
+        # Get registry fields (minus base fields)
+        reg_fields_raw = registry_fields_lookup.get(registry_type)
+        if reg_fields_raw is None:
+            continue
+        reg_fields = reg_fields_raw - _REGISTRY_BASE_FIELDS
+
+        cli_only = wdf_fields - reg_fields
+        reg_only = reg_fields - wdf_fields
+
+        if cli_only or reg_only:
+            parts: list[str] = []
+            if cli_only:
+                parts.append(f'CLI-only: {", ".join(sorted(cli_only))}')
+            if reg_only:
+                parts.append(f'Registry-only: {", ".join(sorted(reg_only))}')
+            drift_lines.append(f'  {registry_type}: {"; ".join(parts)}')
+
+    if drift_lines:
+        return CheckResult(
+            check_name='Field Coverage',
+            status=CheckStatus.WARN,
+            message='Schema drift detected:\n' + '\n'.join(drift_lines),
+        )
+
+    return CheckResult(
+        check_name='Field Coverage',
         status=CheckStatus.PASS,
     )
