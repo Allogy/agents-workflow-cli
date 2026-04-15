@@ -368,6 +368,8 @@ def build_node_parameters(
                 params[key] = node_config[key]
         if 'system_prompt' in node_config:
             params['systemPrompt'] = node_config['system_prompt']
+        if 'topK' in node_config:
+            params['topK'] = node_config['topK']
         if 'primaryInput' in node_config:
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
@@ -584,7 +586,9 @@ def wdf_to_api_payload(
             'function_name': node_slug.replace('-', '_'),
             'parameters': node_parameters,
             'retry_policy': {'max_retries': 3},
-            'timeout_seconds': 30,
+            'timeout_seconds': node_def.timeout_seconds
+            if node_def.timeout_seconds is not None
+            else 30,
             'config': runtime_config,
             'delegated_response': False,
             'step_type': 'STEP',

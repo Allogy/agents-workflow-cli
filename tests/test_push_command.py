@@ -785,6 +785,111 @@ class TestIsUuid:
         """Test that a partial UUID is not detected."""
         assert _is_uuid('5f6a7b8c-9d0e') is False
 
+
+# ============================================================================
+# New Field Mapping Tests (Phase 43-01)
+# ============================================================================
+
+
+class TestPushNewFieldMapping:
+    """Test push mapping for new WDF fields: timeout_seconds, topK."""
+
+    def test_rag_agent_topk_mapped_to_params(self):
+        """topK in RAG_AGENT config should be mapped to params['topK']."""
+        node_config = {
+            'agent_id': str(UUID('22222222-2222-2222-2222-222222222222')),
+            'knowledge_base_ids': ['33333333-3333-3333-3333-333333333333'],
+            'topK': 10,
+        }
+        node_def = NodeDefinition.model_construct(
+            type='rag_agent',
+            execution_mode='MESSAGES',
+            label='RAG Agent',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'rag-node', node_config, {})
+        assert params['topK'] == 10
+
+    def test_rag_agent_without_topk_omits_param(self):
+        """RAG_AGENT without topK should not include topK in params."""
+        node_config = {
+            'agent_id': str(UUID('22222222-2222-2222-2222-222222222222')),
+            'knowledge_base_ids': ['33333333-3333-3333-3333-333333333333'],
+        }
+        node_def = NodeDefinition.model_construct(
+            type='rag_agent',
+            execution_mode='MESSAGES',
+            label='RAG Agent',
+            config=node_config,
+        )
+        params = build_node_parameters(node_def, 'rag-node', node_config, {})
+        assert 'topK' not in params
+
+    def test_timeout_seconds_custom_value_in_payload(self):
+        """Node with timeout_seconds=60 should have that value in the payload."""
+        workflow = WorkflowDefinition(
+            name='Timeout Test',
+            description='Test custom timeout',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    config={},
+                    timeout_seconds=60,
+                ),
+            },
+            edges=[
+                EdgeDefinition.model_validate({'from': 'input', 'to': 'agent'}),
+            ],
+            entry='input',
+            exit='agent',
+        )
+        org_id = UUID('99999999-9999-9999-9999-999999999999')
+        layout = generate_node_layout(workflow)
+        payload, slug_to_uuid = wdf_to_api_payload(workflow, {}, layout, org_id)
+
+        agent_uuid = slug_to_uuid['agent']
+        agent_node = next(n for n in payload['nodes'] if n['id'] == str(agent_uuid))
+        assert agent_node['timeout_seconds'] == 60
+
+    def test_timeout_seconds_default_when_not_set(self):
+        """Node without timeout_seconds should default to 30 in the payload."""
+        workflow = WorkflowDefinition(
+            name='Default Timeout Test',
+            description='Test default timeout',
+            version=1,
+            nodes={
+                'input': NodeDefinition(
+                    type='plain_txt_input',
+                    execution_mode='INPUT',
+                    config={},
+                ),
+                'agent': NodeDefinition(
+                    type='agent',
+                    execution_mode='MESSAGES',
+                    config={},
+                ),
+            },
+            edges=[
+                EdgeDefinition.model_validate({'from': 'input', 'to': 'agent'}),
+            ],
+            entry='input',
+            exit='agent',
+        )
+        org_id = UUID('99999999-9999-9999-9999-999999999999')
+        layout = generate_node_layout(workflow)
+        payload, slug_to_uuid = wdf_to_api_payload(workflow, {}, layout, org_id)
+
+        agent_uuid = slug_to_uuid['agent']
+        agent_node = next(n for n in payload['nodes'] if n['id'] == str(agent_uuid))
+        assert agent_node['timeout_seconds'] == 30
+
     def test_uuid_uppercase(self):
         """Test that uppercase UUID is detected."""
         assert _is_uuid('5F6A7B8C-9D0E-1F2A-3B4C-5D6E7F8A9B0C') is True
