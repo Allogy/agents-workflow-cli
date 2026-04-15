@@ -337,17 +337,9 @@ def build_node_parameters(
             params['text'] = ''
 
     elif node_type == 'file_upload':
-        for key in (
-            'acceptedFormats',
-            'maxFileSize',
-            'textExtraction',
-            'extractTables',
-            'preserveFormatting',
-        ):
+        for key in ('acceptedFormats', 'maxFileSize'):
             if key in node_config:
                 params[key] = node_config[key]
-        if 'textExtraction' in node_config:
-            params['extractText'] = True
 
     elif node_type == 'agent':
         # agentId goes in parameters (already resolved from agent_name)
@@ -380,13 +372,8 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
-        if 'disableRAG' in node_config:
-            params['disableRAG'] = node_config['disableRAG']
-        else:
-            params['disableRAG'] = False
-
     elif node_type == 'llm_call':
-        for key in ('model', 'temperature', 'maxTokens', 'topP'):
+        for key in ('model', 'temperature', 'maxTokens'):
             if key in node_config:
                 params[key] = node_config[key]
         if 'system_prompt' in node_config:
@@ -447,8 +434,6 @@ def build_node_parameters(
                 params[key] = node_config[key]
         if 'system_prompt' in node_config:
             params['systemPrompt'] = node_config['system_prompt']
-        if 'extractionPrompt' in node_config:
-            params['extractionPrompt'] = node_config['extractionPrompt']
         if 'primaryInput' in node_config:
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid

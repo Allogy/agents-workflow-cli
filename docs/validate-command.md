@@ -189,7 +189,10 @@ nodes:
   output:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
 edges:
   - from: input
     to: process
@@ -245,7 +248,10 @@ nodes:
   c:
     type: structured_output
     execution_mode: OUTPUT
-    config: {}
+    config:
+      schema:
+        type: object
+        properties: {}
 edges:
   - from: a
     to: b

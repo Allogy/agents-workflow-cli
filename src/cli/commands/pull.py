@@ -161,10 +161,6 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     'FILE_UPLOAD': {
         'acceptedFormats': None,
         'maxFileSize': None,
-        'textExtraction': None,
-        'extractTables': None,
-        'preserveFormatting': None,
-        'extractText': None,
     },
     'AGENT': {
         'agentId': None,
@@ -177,7 +173,6 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'agentId': None,
         'knowledgeBasesOverride': 'knowledgeBaseIds',
         'primaryInput': None,
-        'disableRAG': None,
     },
     'LLM_CALL': {
         'model': None,
@@ -186,7 +181,6 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'systemPrompt': 'system_prompt',
         'temperature': None,
         'maxTokens': None,
-        'topP': None,
     },
     'RETRIEVE': {
         'knowledgeBaseId': None,
@@ -199,7 +193,6 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     },
     'STRUCTURED_OUTPUT': {
         # schema lives in config, not parameters
-        'extractionPrompt': None,
         'primaryInput': None,
     },
     'HUMAN_REVIEW': {

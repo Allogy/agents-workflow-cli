@@ -17,8 +17,6 @@ nodes:
     config:
       acceptedFormats: [pdf, png, jpg]
       maxFileSize: 10485760  # 10MB
-      textExtraction: automatic
-      extractTables: true
 
   extract:
     type: llm_call

@@ -52,9 +52,6 @@ nodes:
     config:
       acceptedFormats: [pdf, docx, png, jpg]
       maxFileSize: 10485760
-      textExtraction: automatic
-      extractTables: true
-      preserveFormatting: false
 
   # --- Processing Nodes ---
   agent_node:
@@ -93,7 +90,6 @@ nodes:
       model: us.anthropic.claude-sonnet-4-20250514-v1:0
       temperature: 0.3
       maxTokens: 2048
-      topP: 0.9
       template: |
         Given the user input: {{text_input.output.text}}
         And the agent analysis: {{agent_node.output.response}}

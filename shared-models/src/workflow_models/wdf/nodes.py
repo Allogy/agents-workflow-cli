@@ -22,6 +22,30 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # at the field level (callers can use the ExecutionMode enum values).
 VALID_EXECUTION_MODES = {'INPUT', 'OUTPUT', 'MESSAGES', 'FLOW'}
 
+# Dead fields that have been removed from the WDF schema.
+# Centralized list so push/pull/validation all share the same source of truth.
+DEAD_FIELDS: dict[str, str] = {
+    'topP': 'LLM_CALL nodes no longer support topP. Remove this field.',
+    'extractionPrompt': 'STRUCTURED_OUTPUT nodes no longer support extractionPrompt. Remove this field.',
+    'disableRAG': 'RAG_AGENT nodes no longer support disableRAG. Remove this field.',
+    'textExtraction': 'FILE_UPLOAD nodes no longer support textExtraction. Remove this field.',
+    'extractTables': 'FILE_UPLOAD nodes no longer support extractTables. Remove this field.',
+    'preserveFormatting': 'FILE_UPLOAD nodes no longer support preserveFormatting. Remove this field.',
+}
+
+
+def _check_dead_fields(data: dict, dead_fields: set[str]) -> None:
+    """Reject removed WDF fields with a clear error message."""
+    if not isinstance(data, dict):
+        return
+    found = dead_fields & set(data.keys())
+    if found:
+        messages = []
+        for field_name in sorted(found):
+            messages.append(DEAD_FIELDS.get(field_name, f'{field_name} is no longer supported.'))
+        raise ValueError(f'Removed field(s): {", ".join(sorted(found))}. ' + ' '.join(messages))
+
+
 # ============================================
 # EXTRACTION FIELD (used by DocumentExtractionConfig)
 # ============================================
@@ -57,15 +81,18 @@ class StructuredInputConfig(BaseModel):
 class FileUploadConfig(BaseModel):
     """Config for FILE_UPLOAD nodes.
 
-    Fields drawn from backend parameters: acceptedFormats, maxFileSize,
-    textExtraction, extractTables, preserveFormatting.
+    Fields drawn from backend parameters: acceptedFormats, maxFileSize.
+    Removed: textExtraction, extractTables, preserveFormatting (dead fields).
     """
 
     acceptedFormats: list[str]
     maxFileSize: int = Field(..., gt=0)
-    textExtraction: str | None = None
-    extractTables: bool | None = None
-    preserveFormatting: bool | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_dead_fields(cls, data: dict) -> dict:
+        _check_dead_fields(data, {'textExtraction', 'extractTables', 'preserveFormatting'})
+        return data
 
 
 # ============================================
@@ -97,8 +124,8 @@ class RagAgentConfig(BaseModel):
     """Config for RAG_AGENT nodes.
 
     Uses backend parameters: agentId, knowledgeBaseIds (knowledge bases
-    to query), primaryInput (variable reference for input routing), and
-    disableRAG (flag to bypass RAG retrieval while keeping the agent).
+    to query), primaryInput (variable reference for input routing).
+    Removed: disableRAG (dead field).
 
     After ``workflow pull``, UUID-based fields are replaced with
     human-readable name variants (``agent_name``, ``knowledge_base_names``).
@@ -111,10 +138,12 @@ class RagAgentConfig(BaseModel):
     agent_name: str | None = None
     knowledge_base_names: list[str] | None = None
     primaryInput: str | None = None
-    disableRAG: bool | None = Field(
-        default=None,
-        description='When true, bypasses RAG retrieval while keeping the agent.',
-    )
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_dead_fields(cls, data: dict) -> dict:
+        _check_dead_fields(data, {'disableRAG'})
+        return data
 
     @model_validator(mode='after')
     def check_agent_reference(self) -> 'RagAgentConfig':
@@ -137,7 +166,8 @@ class LlmCallConfig(BaseModel):
     """Config for LLM_CALL nodes.
 
     Drawn from backend parameters: model, template (with variable refs),
-    system_prompt, temperature, maxTokens, topP.
+    system_prompt, temperature, maxTokens.
+    Removed: topP (dead field).
     """
 
     model: str
@@ -145,26 +175,33 @@ class LlmCallConfig(BaseModel):
     system_prompt: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     maxTokens: int | None = Field(default=None, gt=0)
-    topP: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_dead_fields(cls, data: dict) -> dict:
+        _check_dead_fields(data, {'topP'})
+        return data
 
 
 class StructuredOutputConfig(BaseModel):
     """Config for STRUCTURED_OUTPUT nodes.
 
-    Backend ``config`` uses ``schema`` (JSON Schema). Also supports
-    ``model`` for LLM-based output generation.
-
-    Additional fields stored in backend ``parameters``:
-    - ``extractionPrompt``: guides the LLM during structured output extraction.
-    - ``primaryInput``: provides context or a variable reference for the node.
+    Backend config uses schema (JSON Schema). Also supports model for LLM-based output.
+    Removed: extractionPrompt (dead field).
+    Changed: schema is now required (was optional).
     """
 
-    schema_: dict[str, Any] | None = Field(default=None, alias='schema')
+    schema_: dict[str, Any] = Field(..., alias='schema')
     model: str | None = None
-    extractionPrompt: str | None = None
     primaryInput: str | None = None
 
     model_config = {'populate_by_name': True}
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_dead_fields(cls, data: dict) -> dict:
+        _check_dead_fields(data, {'extractionPrompt'})
+        return data
 
 
 # ============================================
