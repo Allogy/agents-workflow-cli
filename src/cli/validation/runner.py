@@ -1,4 +1,4 @@
-"""Validation runner that orchestrates all 10 workflow validation checks.
+"""Validation runner that orchestrates all 11 workflow validation checks.
 
 Runs checks in sequence:
 1. YAML syntax parsing
@@ -9,8 +9,9 @@ Runs checks in sequence:
 8. Variable reference validation
 9. Node config validation (part of #2)
 10. Unsupported node types (document_extraction, etc.)
+11. Output variable paths (registry-powered)
 
-Returns structured CheckResult objects with PASS/FAIL/WARN status.
+Returns structured CheckResult objects with PASS/FAIL/WARN/SKIP status.
 
 Reference: Jira RAG-947
 """
@@ -27,11 +28,16 @@ from workflow_models.wdf.validation import (
     check_reachability,
     check_variable_references,
 )
+from workflow_models.wdf.variable_ref import extract_variable_refs
+from workflow_models.wdf.workflow import WorkflowDefinition
 
 from cli.wdf_yaml import load_workflow_yaml
 
 # Node types that pass schema validation but are not supported for push/run.
 UNSUPPORTED_NODE_TYPES: frozenset[str] = frozenset({'document_extraction'})
+
+# Node types where all output paths are user-defined (skip output path validation).
+_DYNAMIC_OUTPUT_TYPES: frozenset[str] = frozenset({'STRUCTURED_INPUT'})
 
 
 class CheckStatus(str, Enum):
@@ -60,15 +66,17 @@ class CheckResult:
     details: dict[str, str | list[str]] | None = None
 
 
-def run_all_validations(yaml_str: str) -> list[CheckResult]:
-    """Run all 10 validation checks on a workflow YAML string.
+def run_all_validations(yaml_str: str, *, registry: dict | None = None) -> list[CheckResult]:
+    """Run all 11 validation checks on a workflow YAML string.
 
     Args:
         yaml_str: Raw YAML content of a .workflow.yaml file.
+        registry: Optional registry dict with ``all_node_types`` data.
+            When *None*, the Output Variable Paths check is skipped.
 
     Returns:
         List of CheckResult objects, one per check. Results are ordered
-        by check sequence (YAML -> Schema -> Graph -> Variables).
+        by check sequence (YAML -> Schema -> Graph -> Variables -> Output Paths).
     """
     results: list[CheckResult] = []
 
@@ -174,6 +182,9 @@ def run_all_validations(yaml_str: str) -> list[CheckResult]:
     else:
         results.append(CheckResult(check_name='Unsupported Node Types', status=CheckStatus.PASS))
 
+    # Check 11: Output Variable Paths (registry-powered)
+    results.append(check_output_variable_paths(workflow, registry))
+
     # Additional synthetic checks for clearer reporting
     # (These are actually covered by WDF Schema Conformance, but we list them separately)
     results.append(CheckResult(check_name='Node Type Recognition', status=CheckStatus.PASS))
@@ -182,3 +193,94 @@ def run_all_validations(yaml_str: str) -> list[CheckResult]:
     results.append(CheckResult(check_name='Node Config Validation', status=CheckStatus.PASS))
 
     return results
+
+
+def _build_output_var_lookup(registry: dict) -> dict[str, set[str]]:
+    """Build node_type (UPPERCASE) -> set of known output paths from registry."""
+    lookup: dict[str, set[str]] = {}
+    for node_info in registry.get('all_node_types', []):
+        node_type = node_info.get('type', '')
+        paths = {
+            var.get('path', '') for var in node_info.get('output_variables', []) if var.get('path')
+        }
+        if paths:
+            lookup[node_type] = paths
+    return lookup
+
+
+def check_output_variable_paths(
+    workflow: WorkflowDefinition,
+    registry: dict | None,
+) -> CheckResult:
+    """Validate output variable field paths against registry's known output_variables.
+
+    For each ``{{slug.output.field}}`` reference:
+    1. Resolve slug -> node -> node.type
+    2. Look up node type's known output_variables from registry
+    3. Check if the referenced path is known
+
+    Returns SKIP if registry is None (offline/no cache).
+    Returns PASS if all paths are valid.
+    Returns FAIL if any path references an unknown output variable.
+    """
+    if registry is None:
+        return CheckResult(
+            check_name='Output Variable Paths',
+            status=CheckStatus.SKIP,
+            message='Registry unavailable -- skipping output variable path check',
+        )
+
+    lookup = _build_output_var_lookup(registry)
+    invalid_refs: list[dict[str, str]] = []
+
+    for slug, node_def in workflow.nodes.items():
+        refs = extract_variable_refs(node_def.config)
+        for ref in refs:
+            # Skip refs to non-existent nodes (caught by Check 8)
+            if ref.slug not in workflow.nodes:
+                continue
+
+            referenced_node = workflow.nodes[ref.slug]
+            registry_type = referenced_node.type.upper()
+
+            # Skip node types with fully dynamic output
+            if registry_type in _DYNAMIC_OUTPUT_TYPES:
+                continue
+
+            known_paths = lookup.get(registry_type)
+            if known_paths is None:
+                # Node type not in registry -- skip (not an error)
+                continue
+
+            if ref.path not in known_paths:
+                valid_alternatives = sorted(known_paths)
+                invalid_refs.append(
+                    {
+                        'node': slug,
+                        'referenced_node': ref.slug,
+                        'referenced_type': registry_type,
+                        'path': ref.path,
+                        'reference': f'{{{{{ref.raw}}}}}',
+                        'valid_paths': ', '.join(valid_alternatives),
+                    }
+                )
+
+    if invalid_refs:
+        details_lines = []
+        for inv in invalid_refs:
+            details_lines.append(
+                f'  {inv["reference"]} in node {inv["node"]!r}: '
+                f'{inv["path"]!r} is not a known output of {inv["referenced_type"]}. '
+                f'Valid: {inv["valid_paths"]}'
+            )
+        return CheckResult(
+            check_name='Output Variable Paths',
+            status=CheckStatus.FAIL,
+            message='Unknown output variable paths:\n' + '\n'.join(details_lines),
+            details={'invalid_refs': invalid_refs},
+        )
+
+    return CheckResult(
+        check_name='Output Variable Paths',
+        status=CheckStatus.PASS,
+    )

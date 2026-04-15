@@ -51,8 +51,10 @@ entry: input
 exit: output
 """
         results = run_all_validations(wf_yaml)
-        assert len(results) == 10
-        assert all(r.status in {CheckStatus.PASS, CheckStatus.WARN} for r in results)
+        assert len(results) == 11
+        assert all(
+            r.status in {CheckStatus.PASS, CheckStatus.WARN, CheckStatus.SKIP} for r in results
+        )
 
         # Check specific checks
         check_names = {r.check_name for r in results}
