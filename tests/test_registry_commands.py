@@ -1,7 +1,8 @@
-"""Unit tests for registry CLI commands (refresh, status).
+"""Unit tests for registry CLI commands (refresh, status) and validate registry integration.
 
-Tests the Typer subcommand group and its integration with the
-registry client module from Plan 01.
+Tests the Typer subcommand group, its integration with the
+registry client module from Plan 01, and validate command wiring
+for auto-fetch, stale warnings, --offline flag, and SKIP rendering.
 
 Reference: Phase 41, Plan 02
 """
@@ -9,13 +10,15 @@ Reference: Phase 41, Plan 02
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 import pytest
 
 from cli.config import CLIConfig
-from cli.registry import RegistryCache
+from cli.registry import RegistryCache, RegistryResult
+from cli.validation.runner import CheckResult, CheckStatus
 
 SAMPLE_REGISTRY = {
     'version': '1.0',
@@ -148,3 +151,153 @@ class TestStatusCommand:
         result = cli_invoke('registry', 'status')
         assert result.exit_code == 0
         assert 'No registry cache found' in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Fixtures for validate integration tests
+# ---------------------------------------------------------------------------
+
+VALID_WORKFLOW_YAML = """\
+name: Valid
+nodes:
+  a:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config: {}
+edges: []
+entry: a
+exit: a
+"""
+
+
+@pytest.fixture()
+def valid_workflow_file(tmp_path: Path) -> Path:
+    """Create a minimal valid workflow file for testing."""
+    wf_file = tmp_path / 'test.workflow.yaml'
+    wf_file.write_text(VALID_WORKFLOW_YAML)
+    return wf_file
+
+
+# ---------------------------------------------------------------------------
+# Validate + registry integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRegistryIntegration:
+    """
+    Scenario: Validate command integrates with registry auto-fetch
+    Given a workflow file and registry configuration
+    When 'workflow validate' is run
+    Then get_registry() is called for auto-fetch/cache behavior
+    """
+
+    @patch(
+        'cli.commands.validate.get_registry',
+        return_value=RegistryResult(registry=SAMPLE_REGISTRY, is_stale=False),
+    )
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_auto_fetches_on_first_run(
+        self, _mock_config, mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """Validate calls get_registry() on every run for auto-fetch behavior."""
+        cli_invoke('validate', str(valid_workflow_file))
+        mock_get_registry.assert_called_once_with('https://api.example.com', offline=False)
+
+    @patch(
+        'cli.commands.validate.get_registry',
+        return_value=RegistryResult(registry=SAMPLE_REGISTRY, is_stale=False),
+    )
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_auto_fetch_silent_on_success(
+        self, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """Fresh cache hit is silent -- no warning in output."""
+        result = cli_invoke('validate', str(valid_workflow_file))
+        assert 'Warning' not in result.stdout
+        assert 'expired' not in result.stdout
+
+    @patch(
+        'cli.commands.validate.get_registry',
+        return_value=RegistryResult(registry=SAMPLE_REGISTRY, is_stale=True),
+    )
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_stale_cache_shows_warning(
+        self, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """Stale cache shows warning mentioning 'workflow registry refresh'."""
+        result = cli_invoke('validate', str(valid_workflow_file))
+        assert 'Registry cache expired' in result.stdout
+        assert 'workflow registry refresh' in result.stdout
+
+    @patch('cli.commands.validate.get_registry', return_value=None)
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_no_registry_no_warning(
+        self, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """No registry result (None) produces no warning."""
+        result = cli_invoke('validate', str(valid_workflow_file))
+        assert 'Warning' not in result.stdout
+
+
+class TestValidateOfflineFlag:
+    """
+    Scenario: Validate --offline flag skips registry checks
+    Given the --offline flag
+    When 'workflow validate --offline' is run
+    Then offline=True is passed to get_registry()
+    """
+
+    @patch('cli.commands.validate.get_registry', return_value=None)
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_offline_flag_accepted(
+        self, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """The --offline flag is accepted without error."""
+        result = cli_invoke('validate', '--offline', str(valid_workflow_file))
+        assert result.exit_code == 0
+
+    @patch('cli.commands.validate.get_registry', return_value=None)
+    @patch('cli.main.get_config', return_value=_make_config())
+    def test_validate_offline_passes_to_get_registry(
+        self, _mock_config, mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """The --offline flag passes offline=True to get_registry()."""
+        cli_invoke('validate', '--offline', str(valid_workflow_file))
+        mock_get_registry.assert_called_once_with('https://api.example.com', offline=True)
+
+    @patch('cli.commands.validate.get_registry', return_value=None)
+    @patch('cli.main.get_config', return_value=_make_config())
+    @patch('cli.commands.validate.run_all_validations')
+    def test_validate_skip_rendering(
+        self, mock_run, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """SKIP status renders as dim text in the table."""
+        mock_run.return_value = [
+            CheckResult(check_name='YAML Syntax', status=CheckStatus.PASS),
+            CheckResult(
+                check_name='Registry Check',
+                status=CheckStatus.SKIP,
+                message='No registry data',
+            ),
+        ]
+        result = cli_invoke('validate', str(valid_workflow_file))
+        assert 'SKIP' in result.stdout
+
+    @patch('cli.commands.validate.get_registry', return_value=None)
+    @patch('cli.main.get_config', return_value=_make_config())
+    @patch('cli.commands.validate.run_all_validations')
+    def test_validate_summary_includes_skip_count(
+        self, mock_run, _mock_config, _mock_get_registry, cli_invoke, valid_workflow_file
+    ):
+        """Summary line includes skip count when SKIP results are present."""
+        mock_run.return_value = [
+            CheckResult(check_name='YAML Syntax', status=CheckStatus.PASS),
+            CheckResult(check_name='Schema', status=CheckStatus.PASS),
+            CheckResult(
+                check_name='Registry Check',
+                status=CheckStatus.SKIP,
+                message='No registry data',
+            ),
+        ]
+        result = cli_invoke('validate', str(valid_workflow_file))
+        assert 'skipped' in result.stdout

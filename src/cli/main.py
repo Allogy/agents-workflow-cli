@@ -132,10 +132,21 @@ def validate(
             exists=False,  # We handle existence check in the command
         ),
     ],
+    offline: Annotated[
+        bool,
+        typer.Option(
+            '--offline',
+            help='Skip all registry-powered checks (for CI/CD or air-gapped environments).',
+        ),
+    ] = False,
 ) -> None:
-    """Validate a workflow definition file offline.
+    """Validate a workflow definition file.
 
-    Runs 10 validation checks with no API calls:
+    Runs 10 offline validation checks plus optional registry-augmented checks.
+    Auto-fetches the node type registry on first run (or when cache expires).
+    Use --offline to skip all registry checks.
+
+    Offline checks:
     - YAML syntax
     - WDF schema conformance
     - Node type recognition
@@ -149,7 +160,7 @@ def validate(
 
     Exit codes: 0 = pass, 1 = failure
     """
-    validate_command(file_path)
+    validate_command(file_path, offline=offline)
 
 
 @app.command()
