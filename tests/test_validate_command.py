@@ -8,7 +8,15 @@ Reference: Jira RAG-947
 
 from pathlib import Path
 
-from cli.validation.runner import CheckStatus, check_output_variable_paths, run_all_validations
+from types import SimpleNamespace
+
+from cli.validation.runner import (
+    CheckStatus,
+    check_field_coverage,
+    check_inactive_node_types,
+    check_output_variable_paths,
+    run_all_validations,
+)
 
 
 class TestValidationRunner:
@@ -426,6 +434,20 @@ SAMPLE_REGISTRY = {
     'all_node_types': [
         {
             'type': 'LLM_CALL',
+            'status': 'active',
+            'fields': [
+                {'name': 'model_name'},
+                {'name': 'system_prompt'},
+                {'name': 'temperature'},
+                {'name': 'max_tokens'},
+                {'name': 'tools'},
+                {'name': 'timeout_seconds'},
+                {'name': 'retry_count'},
+                {'name': 'retry_delay_seconds'},
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
             'output_variables': [
                 {'path': 'output', 'type': 'object'},
                 {'path': 'output.text', 'type': 'string'},
@@ -434,6 +456,23 @@ SAMPLE_REGISTRY = {
         },
         {
             'type': 'AGENT',
+            'status': 'active',
+            'fields': [
+                {'name': 'model_name'},
+                {'name': 'system_prompt'},
+                {'name': 'temperature'},
+                {'name': 'max_tokens'},
+                {'name': 'tools'},
+                {'name': 'agent_name'},
+                {'name': 'retries'},
+                {'name': 'instrument'},
+                {'name': 'timeout_seconds'},
+                {'name': 'retry_count'},
+                {'name': 'retry_delay_seconds'},
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
             'output_variables': [
                 {'path': 'output', 'type': 'object'},
                 {'path': 'output.response', 'type': 'string'},
@@ -442,6 +481,15 @@ SAMPLE_REGISTRY = {
         },
         {
             'type': 'STRUCTURED_INPUT',
+            'status': 'active',
+            'fields': [
+                {'name': 'input_schema'},
+                {'name': 'required'},
+                {'name': 'placeholder'},
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
             'output_variables': [
                 {'path': 'output', 'type': 'object'},
                 {'path': 'output.formData', 'type': 'object'},
@@ -450,10 +498,37 @@ SAMPLE_REGISTRY = {
         },
         {
             'type': 'PLAIN_TXT_INPUT',
+            'status': 'active',
+            'fields': [
+                {'name': 'placeholder'},
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
             'output_variables': [
                 {'path': 'output', 'type': 'object'},
                 {'path': 'output.text', 'type': 'string'},
             ],
+        },
+        {
+            'type': 'SELECTION',
+            'status': 'inactive',
+            'fields': [
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
+            'output_variables': [],
+        },
+        {
+            'type': 'ITERATOR',
+            'status': 'inactive',
+            'fields': [
+                {'name': 'name'},
+                {'name': 'description'},
+                {'name': 'metadata'},
+            ],
+            'output_variables': [],
         },
     ],
 }
@@ -683,3 +758,141 @@ class TestOutputVariableValidation:
         assert 'Output Variable Paths' in check_names
         output_check = next(r for r in results if r.check_name == 'Output Variable Paths')
         assert output_check.status == CheckStatus.PASS
+
+
+# ---------------------------------------------------------------------------
+# Inactive Node Type & Field Coverage Validation Tests
+# ---------------------------------------------------------------------------
+
+
+def _make_workflow(node_types: dict[str, str]) -> SimpleNamespace:
+    """Create a minimal workflow-like object for testing check functions.
+
+    Args:
+        node_types: Mapping of slug -> node type string (lowercase).
+    """
+    nodes = {slug: SimpleNamespace(type=ntype) for slug, ntype in node_types.items()}
+    return SimpleNamespace(nodes=nodes)
+
+
+class TestInactiveNodeTypeValidation:
+    """
+    Scenario: Inactive node types are flagged during validation
+    Given a workflow with nodes whose types may be inactive in the registry
+    When check_inactive_node_types is called
+    Then inactive types return WARN with slug and type name
+    """
+
+    def test_skip_when_registry_is_none(self):
+        """check_inactive_node_types returns SKIP when registry is None."""
+        workflow = _make_workflow({'input': 'plain_txt_input'})
+        result = check_inactive_node_types(workflow, registry=None)
+        assert result.status == CheckStatus.SKIP
+        assert result.check_name == 'Inactive Node Types'
+
+    def test_pass_when_all_types_active(self):
+        """All active node types return PASS."""
+        workflow = _make_workflow(
+            {
+                'input': 'plain_txt_input',
+                'process': 'llm_call',
+            }
+        )
+        result = check_inactive_node_types(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.PASS
+        assert result.check_name == 'Inactive Node Types'
+
+    def test_warn_when_inactive_type_used(self):
+        """Workflow with an inactive type returns WARN with slug and type."""
+        workflow = _make_workflow({'chooser': 'selection'})
+        result = check_inactive_node_types(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.WARN
+        assert 'chooser' in result.message
+        assert 'SELECTION' in result.message
+
+    def test_multiple_inactive_types(self):
+        """Workflow with multiple inactive types lists all in WARN."""
+        workflow = _make_workflow(
+            {
+                'chooser': 'selection',
+                'loop': 'iterator',
+            }
+        )
+        result = check_inactive_node_types(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.WARN
+        assert 'SELECTION' in result.message
+        assert 'ITERATOR' in result.message
+
+
+class TestFieldCoverageValidation:
+    """
+    Scenario: Field coverage drift between CLI WDF models and registry
+    Given a workflow with node types that have WDF config models
+    When check_field_coverage is called
+    Then drift is reported as WARN with per-type CLI-only and Registry-only fields
+    """
+
+    def test_skip_when_registry_is_none(self):
+        """check_field_coverage returns SKIP when registry is None."""
+        workflow = _make_workflow({'input': 'plain_txt_input'})
+        result = check_field_coverage(workflow, registry=None)
+        assert result.status == CheckStatus.SKIP
+        assert result.check_name == 'Field Coverage'
+
+    def test_pass_when_fields_aligned(self):
+        """Fields aligned (minus base fields) returns PASS."""
+        # plain_txt_input WDF has only 'placeholder'; registry has 'placeholder' + base fields
+        workflow = _make_workflow({'input': 'plain_txt_input'})
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.PASS
+
+    def test_warn_cli_only_fields(self):
+        """WDF fields not in registry produce CLI-only WARN."""
+        workflow = _make_workflow({'process': 'llm_call'})
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.WARN
+        assert 'CLI-only' in result.message
+
+    def test_warn_registry_only_fields(self):
+        """Registry fields not in WDF produce Registry-only WARN."""
+        workflow = _make_workflow({'process': 'llm_call'})
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        assert result.status == CheckStatus.WARN
+        assert 'Registry-only' in result.message
+
+    def test_base_fields_excluded(self):
+        """Base fields (name, description, metadata) do not appear in output."""
+        workflow = _make_workflow({'process': 'llm_call'})
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        # Even though registry has name/description/metadata, they should be excluded
+        if result.message:
+            assert 'name' not in result.message.split('Registry-only:')[-1].split(';')[0] or (
+                'model_name' in result.message
+            )
+
+    def test_inactive_types_skipped(self):
+        """Inactive types are skipped in field coverage comparison."""
+        workflow = _make_workflow(
+            {
+                'chooser': 'selection',
+                'input': 'plain_txt_input',
+            }
+        )
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        # SELECTION is inactive, so no field comparison for it -- only plain_txt_input checked
+        if result.message:
+            assert 'SELECTION' not in result.message
+
+    def test_deduplicates_node_types(self):
+        """Multiple nodes of same type produce only one comparison entry."""
+        workflow = _make_workflow(
+            {
+                'process1': 'llm_call',
+                'process2': 'llm_call',
+                'process3': 'llm_call',
+            }
+        )
+        result = check_field_coverage(workflow, registry=SAMPLE_REGISTRY)
+        # LLM_CALL should appear only once in the message
+        if result.message:
+            assert result.message.count('LLM_CALL') == 1
