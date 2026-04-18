@@ -81,12 +81,13 @@ class StructuredInputConfig(BaseModel):
 class FileUploadConfig(BaseModel):
     """Config for FILE_UPLOAD nodes.
 
-    Fields drawn from backend parameters: acceptedFormats, maxFileSize.
+    Fields drawn from backend parameters: acceptedFormats, maxFileSize, saveToMemory.
     Removed: textExtraction, extractTables, preserveFormatting (dead fields).
     """
 
     acceptedFormats: list[str]
     maxFileSize: int = Field(..., gt=0)
+    saveToMemory: bool = False
 
     @model_validator(mode='before')
     @classmethod

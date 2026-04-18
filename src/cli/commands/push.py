@@ -339,7 +339,7 @@ def build_node_parameters(
             params['text'] = ''
 
     elif node_type == 'file_upload':
-        for key in ('acceptedFormats', 'maxFileSize'):
+        for key in ('acceptedFormats', 'maxFileSize', 'saveToMemory'):
             if key in node_config:
                 params[key] = node_config[key]
 

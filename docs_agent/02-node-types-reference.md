@@ -78,6 +78,7 @@ Config fields:
 |-------|------|----------|-------------|
 | `acceptedFormats` | list[string] | Yes | Allowed file extensions (e.g., pdf, docx, csv) |
 | `maxFileSize` | integer | Yes | Maximum file size in bytes (10485760 = 10 MB) |
+| `saveToMemory` | boolean | No | When `true`, uploaded files are stored in the RLM sandbox memory bucket (`RLM_SANDBOX_MEMORY_BUCKET_NAME`) instead of the default workflow inputs bucket. Defaults to `false`. |
 
 ## Processing Nodes
 

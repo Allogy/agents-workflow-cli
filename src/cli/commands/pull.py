@@ -161,6 +161,7 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
     'FILE_UPLOAD': {
         'acceptedFormats': None,
         'maxFileSize': None,
+        'saveToMemory': None,
     },
     'AGENT': {
         'agentId': None,
