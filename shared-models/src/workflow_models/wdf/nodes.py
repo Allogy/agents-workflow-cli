@@ -120,6 +120,7 @@ class AgentConfig(BaseModel):
     agentId: str | None = None
     primaryInput: str | None = None
     system_prompt: str | None = None
+    use_rlm: bool | None = None
 
 
 class RagAgentConfig(BaseModel):

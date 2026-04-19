@@ -356,6 +356,8 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
+        if 'use_rlm' in node_config:
+            params['use_rlm'] = node_config['use_rlm']
 
     elif node_type == 'rag_agent':
         if 'agent_id' in node_config:

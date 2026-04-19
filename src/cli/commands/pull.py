@@ -170,6 +170,7 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'temperature': None,
         'maxTokens': None,
         'systemPrompt': 'system_prompt',
+        'use_rlm': None,
     },
     'RAG_AGENT': {
         'agentId': None,
@@ -227,6 +228,7 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
         'maxTokens': None,
         'tools': None,
         'agent_id': 'agentId',
+        'use_rlm': None,
     },
     'STRUCTURED_INPUT': {
         'schema': None,
