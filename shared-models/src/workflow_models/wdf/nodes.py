@@ -121,6 +121,7 @@ class AgentConfig(BaseModel):
     primaryInput: str | None = None
     system_prompt: str | None = None
     use_rlm: bool | None = None
+    web_tools_enabled: bool | None = None
 
 
 class RagAgentConfig(BaseModel):

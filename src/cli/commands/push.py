@@ -358,6 +358,8 @@ def build_node_parameters(
             )
         if 'use_rlm' in node_config:
             params['use_rlm'] = node_config['use_rlm']
+        if 'web_tools_enabled' in node_config:
+            params['web_tools_enabled'] = node_config['web_tools_enabled']
 
     elif node_type == 'rag_agent':
         if 'agent_id' in node_config:
