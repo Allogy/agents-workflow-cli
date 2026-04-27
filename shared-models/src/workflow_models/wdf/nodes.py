@@ -96,6 +96,33 @@ class FileUploadConfig(BaseModel):
         return data
 
 
+class MemoryFileUrlConfig(BaseModel):
+    """Config for MEMORY_FILE_URL nodes.
+
+    Produces a Document-Links-style download URL for a file the upstream
+    pipeline wrote into the RLM agent memory bucket. ``path`` is relative
+    to the org's memory root (e.g. ``outputs/report.pdf``) and may be a
+    template variable (``{{slug.output.filename}}``).
+    """
+
+    path: str = Field(..., min_length=1)
+
+    @field_validator('path')
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('path must be non-empty')
+        # Reject absolute paths and upward traversal. The backend re-checks
+        # after template resolution, but failing fast in CLI validation is
+        # friendlier to workflow authors.
+        if v.startswith('/'):
+            raise ValueError(f'path must be relative (got absolute path: {v!r})')
+        parts = v.split('/')
+        if '..' in parts:
+            raise ValueError(f"path must not contain '..' segments (got: {v!r})")
+        return v
+
+
 # ============================================
 # PROCESSING NODE CONFIGS
 # ============================================
@@ -293,6 +320,7 @@ NODE_TYPE_CONFIG_MAP: dict[str, type[BaseModel]] = {
     'plain_txt_input': PlainTxtInputConfig,
     'structured_input': StructuredInputConfig,
     'file_upload': FileUploadConfig,
+    'memory_file_url': MemoryFileUrlConfig,
     'agent': AgentConfig,
     'rag_agent': RagAgentConfig,
     'llm_call': LlmCallConfig,

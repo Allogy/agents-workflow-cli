@@ -195,10 +195,11 @@ def _build_schema_lookup(registry: dict) -> dict[str, dict[str, Any]]:
         Dict mapping node type names (UPPERCASE) to their JSON Schema objects.
     """
     lookup: dict[str, dict[str, Any]] = {}
-    all_types = registry.get('all_node_types', {})
-    for type_name, info in all_types.items():
+    all_types = registry.get('all_node_types', [])
+    for info in all_types:
+        type_name = info.get('type', '')
         schema = info.get('config_json_schema')
-        if schema:
+        if type_name and schema:
             lookup[type_name.upper()] = schema
     return lookup
 

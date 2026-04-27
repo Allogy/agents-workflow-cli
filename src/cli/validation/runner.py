@@ -39,8 +39,9 @@ from cli.wdf_yaml import load_workflow_yaml
 # Node types that pass schema validation but are not supported for push/run.
 UNSUPPORTED_NODE_TYPES: frozenset[str] = frozenset({'document_extraction'})
 
-# Node types where all output paths are user-defined (skip output path validation).
-_DYNAMIC_OUTPUT_TYPES: frozenset[str] = frozenset({'STRUCTURED_INPUT'})
+# Node types where output paths below the top-level FormattedNodeOutput are user-defined
+# (driven by a user-supplied JSON Schema) and cannot be validated against a registry.
+_DYNAMIC_OUTPUT_TYPES: frozenset[str] = frozenset({'STRUCTURED_INPUT', 'STRUCTURED_OUTPUT'})
 
 # Base fields present on every registry node type -- excluded from field coverage comparison.
 _REGISTRY_BASE_FIELDS: frozenset[str] = frozenset({'name', 'description', 'metadata'})

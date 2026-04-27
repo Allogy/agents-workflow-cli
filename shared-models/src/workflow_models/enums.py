@@ -27,6 +27,9 @@ class NodeConfigType(str, Enum):
     STRUCTURED_INPUT = 'STRUCTURED_INPUT'
     FILE_UPLOAD = 'FILE_UPLOAD'
 
+    # Output / sharing nodes
+    MEMORY_FILE_URL = 'MEMORY_FILE_URL'
+
     # Human interaction
     HUMAN_REVIEW = 'HUMAN_REVIEW'
 

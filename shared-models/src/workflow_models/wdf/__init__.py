@@ -23,6 +23,7 @@ from workflow_models.wdf.nodes import (
     FileUploadConfig,
     HumanReviewConfig,
     LlmCallConfig,
+    MemoryFileUrlConfig,
     NodeDefinition,
     PlainTxtInputConfig,
     RagAgentConfig,
@@ -55,6 +56,7 @@ __all__ = [
     'RetrieveConfig',
     'DocumentExtractionConfig',
     'HumanReviewConfig',
+    'MemoryFileUrlConfig',
     # Supporting types
     'ExtractionField',
     'VALID_NODE_TYPES',

@@ -21,6 +21,7 @@ from workflow_models.wdf.nodes import (
     FileUploadConfig,
     HumanReviewConfig,
     LlmCallConfig,
+    MemoryFileUrlConfig,
     NodeDefinition,
     PlainTxtInputConfig,
     RagAgentConfig,
@@ -625,6 +626,18 @@ class TestNodeDefinition:
         )
         assert isinstance(node.parsed_config, FileUploadConfig)
 
+    def test_memory_file_url_node(self):
+        node = NodeDefinition(
+            type='memory_file_url',
+            execution_mode='OUTPUT',
+            label='Signed URL',
+            config={'path': '{{files_collector.output.stage_2}}'},
+        )
+        assert node.type == 'memory_file_url'
+        assert node.execution_mode == 'OUTPUT'
+        assert isinstance(node.parsed_config, MemoryFileUrlConfig)
+        assert node.parsed_config.path == '{{files_collector.output.stage_2}}'
+
     def test_unknown_node_type_raises(self):
         """Unknown node types should be rejected."""
         with pytest.raises(ValidationError):
@@ -670,8 +683,8 @@ class TestNodeDefinition:
         )
         assert node.label is None
 
-    def test_all_10_node_types_recognized(self):
-        """Verify all 10 node types from the ticket can be created."""
+    def test_all_11_node_types_recognized(self):
+        """Verify all 11 node types from the ticket can be created."""
         valid_types = [
             ('plain_txt_input', 'INPUT', {}),
             ('structured_input', 'INPUT', {'schema': {'type': 'object'}}),
@@ -691,6 +704,7 @@ class TestNodeDefinition:
             ('retrieve', 'FLOW', {'knowledgeBaseId': 'kb-1'}),
             ('document_extraction', 'FLOW', {}),
             ('human_review', 'FLOW', {}),
+            ('memory_file_url', 'OUTPUT', {'path': 'outputs/report.md'}),
         ]
         for node_type, exec_mode, config in valid_types:
             node = NodeDefinition(type=node_type, execution_mode=exec_mode, config=config)
@@ -837,3 +851,72 @@ class TestDeadFieldRejection:
         """StructuredOutputConfig works when schema is provided."""
         config = StructuredOutputConfig.model_validate({'schema': {'type': 'object'}})
         assert config.schema_ == {'type': 'object'}
+
+
+# ============================================
+# MEMORY_FILE_URL Config
+# ============================================
+
+
+class TestMemoryFileUrlConfig:
+    """MEMORY_FILE_URL: path (required, relative, no traversal)."""
+
+    def test_simple_path_valid(self):
+        config = MemoryFileUrlConfig.model_validate({'path': 'report.pdf'})
+        assert config.path == 'report.pdf'
+
+    def test_nested_path_valid(self):
+        config = MemoryFileUrlConfig.model_validate({'path': 'outputs/2026/report.pdf'})
+        assert config.path == 'outputs/2026/report.pdf'
+
+    def test_template_path_valid(self):
+        # Templates are resolved at runtime; the config layer only rejects
+        # structurally bad paths. Literal '{{...}}' is acceptable here.
+        config = MemoryFileUrlConfig.model_validate({'path': '{{upload.output.filename}}'})
+        assert config.path == '{{upload.output.filename}}'
+
+    def test_missing_path_rejected(self):
+        with pytest.raises(ValidationError, match='path'):
+            MemoryFileUrlConfig.model_validate({})
+
+    def test_empty_path_rejected(self):
+        with pytest.raises(ValidationError):
+            MemoryFileUrlConfig.model_validate({'path': ''})
+
+    def test_whitespace_path_rejected(self):
+        with pytest.raises(ValidationError, match='non-empty'):
+            MemoryFileUrlConfig.model_validate({'path': '   '})
+
+    def test_absolute_path_rejected(self):
+        with pytest.raises(ValidationError, match='relative'):
+            MemoryFileUrlConfig.model_validate({'path': '/etc/passwd'})
+
+    def test_parent_traversal_rejected(self):
+        with pytest.raises(ValidationError, match=r'\.\.'):
+            MemoryFileUrlConfig.model_validate({'path': '../../etc/passwd'})
+
+    def test_embedded_traversal_rejected(self):
+        with pytest.raises(ValidationError, match=r'\.\.'):
+            MemoryFileUrlConfig.model_validate({'path': 'outputs/../secret'})
+
+    def test_node_definition_accepts_memory_file_url(self):
+        """NodeDefinition dispatches validation to MemoryFileUrlConfig for type=memory_file_url."""
+        node = NodeDefinition.model_validate(
+            {
+                'type': 'memory_file_url',
+                'execution_mode': 'OUTPUT',
+                'config': {'path': 'outputs/report.pdf'},
+            }
+        )
+        assert isinstance(node.parsed_config, MemoryFileUrlConfig)
+        assert node.parsed_config.path == 'outputs/report.pdf'
+
+    def test_node_definition_rejects_invalid_memory_file_url_config(self):
+        with pytest.raises(ValidationError, match='relative'):
+            NodeDefinition.model_validate(
+                {
+                    'type': 'memory_file_url',
+                    'execution_mode': 'OUTPUT',
+                    'config': {'path': '/abs/path'},
+                }
+            )

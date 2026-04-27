@@ -19,10 +19,10 @@ from workflow_models.enums import (
 
 
 class TestNodeConfigType:
-    """NodeConfigType should have all 12 node types."""
+    """NodeConfigType should have all 13 node types."""
 
-    def test_has_12_values(self):
-        assert len(NodeConfigType) == 12
+    def test_has_13_values(self):
+        assert len(NodeConfigType) == 13
 
     def test_agent_nodes(self):
         assert NodeConfigType.AGENT == 'AGENT'
@@ -39,6 +39,9 @@ class TestNodeConfigType:
         assert NodeConfigType.PLAIN_TXT_INPUT == 'PLAIN_TXT_INPUT'
         assert NodeConfigType.STRUCTURED_INPUT == 'STRUCTURED_INPUT'
         assert NodeConfigType.FILE_UPLOAD == 'FILE_UPLOAD'
+
+    def test_output_sharing_nodes(self):
+        assert NodeConfigType.MEMORY_FILE_URL == 'MEMORY_FILE_URL'
 
     def test_human_interaction_nodes(self):
         assert NodeConfigType.HUMAN_REVIEW == 'HUMAN_REVIEW'
@@ -119,25 +122,29 @@ class TestPathType:
 
 
 class TestExecutionStatus:
-    def test_has_6_values(self):
-        assert len(ExecutionStatus) == 6
+    def test_has_9_values(self):
+        assert len(ExecutionStatus) == 9
 
     def test_values(self):
         assert ExecutionStatus.PENDING == 'PENDING'
         assert ExecutionStatus.RUNNING == 'RUNNING'
+        assert ExecutionStatus.PAUSED == 'PAUSED'
         assert ExecutionStatus.COMPLETED == 'COMPLETED'
         assert ExecutionStatus.FAILED == 'FAILED'
         assert ExecutionStatus.CANCELLED == 'CANCELLED'
-        assert ExecutionStatus.TIMEOUT == 'TIMEOUT'
+        assert ExecutionStatus.TIMED_OUT == 'TIMED_OUT'
+        assert ExecutionStatus.WAITING_FOR_REVIEW == 'WAITING_FOR_REVIEW'
+        assert ExecutionStatus.WAITING_FOR_INPUT == 'WAITING_FOR_INPUT'
 
 
 class TestNodeExecutionStatus:
-    def test_has_5_values(self):
-        assert len(NodeExecutionStatus) == 5
+    def test_has_6_values(self):
+        assert len(NodeExecutionStatus) == 6
 
     def test_values(self):
         assert NodeExecutionStatus.PENDING == 'PENDING'
         assert NodeExecutionStatus.RUNNING == 'RUNNING'
+        assert NodeExecutionStatus.WAITING_INPUT == 'WAITING_INPUT'
         assert NodeExecutionStatus.COMPLETED == 'COMPLETED'
         assert NodeExecutionStatus.FAILED == 'FAILED'
         assert NodeExecutionStatus.SKIPPED == 'SKIPPED'

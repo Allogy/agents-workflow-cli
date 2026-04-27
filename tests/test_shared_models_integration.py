@@ -51,7 +51,7 @@ from workflow_models import (
 
 def test_cli_can_import_all_enums():
     """The CLI can import all 8 workflow enums from the shared package."""
-    assert len(NodeConfigType) == 12
+    assert len(NodeConfigType) == 13
     assert len(ExecutionMode) == 4
     assert len(EdgeType) == 5
     assert len(StepExecutionType) == 4

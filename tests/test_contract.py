@@ -72,22 +72,22 @@ SAMPLE_LLM_SCHEMA = {
 }
 
 SAMPLE_REGISTRY = {
-    'all_node_types': {
-        'AGENT': {
-            'type_name': 'AGENT',
+    'all_node_types': [
+        {
+            'type': 'AGENT',
             'status': 'active',
             'config_json_schema': SAMPLE_AGENT_SCHEMA,
             'output_variables': ['text', 'metadata'],
             'config_fields': ['model_name', 'max_tokens', 'temperature'],
         },
-        'LLM_CALL': {
-            'type_name': 'LLM_CALL',
+        {
+            'type': 'LLM_CALL',
             'status': 'active',
             'config_json_schema': SAMPLE_LLM_SCHEMA,
             'output_variables': ['text'],
             'config_fields': ['model_name', 'system_prompt', 'max_tokens', 'temperature'],
         },
-    },
+    ],
     'schema_definitions': {},
 }
 
@@ -458,13 +458,13 @@ class TestSchemaDefsMergeIntegration:
             },
         }
         registry = {
-            'all_node_types': {
-                'AGENT': {
-                    'type_name': 'AGENT',
+            'all_node_types': [
+                {
+                    'type': 'AGENT',
                     'status': 'active',
                     'config_json_schema': schema_with_ref,
                 },
-            },
+            ],
             'schema_definitions': {
                 'ModelName': {'type': 'string'},
             },

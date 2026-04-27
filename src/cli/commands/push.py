@@ -72,6 +72,7 @@ _WDF_TYPE_TO_PARAMS_TYPE: dict[str, str] = {
     'retrieve': 'retrieve',
     'document_extraction': 'documentExtraction',
     'human_review': 'humanReview',
+    'memory_file_url': 'memoryFileUrl',
 }
 
 
@@ -451,6 +452,10 @@ def build_node_parameters(
         # schema stays in config, not parameters
         pass
 
+    elif node_type == 'memory_file_url':
+        # `path` lives in config (registry requires it there). No parameter fields.
+        pass
+
     return params
 
 
@@ -581,6 +586,14 @@ def wdf_to_api_payload(
                 runtime_config['enable_reranking'] = node_config['enableReranking']
             if 'includeMetadata' in node_config:
                 runtime_config['include_metadata'] = node_config['includeMetadata']
+        elif node_def.type == 'memory_file_url':
+            # Registry schema requires `path` at the config root. Path may contain
+            # `{{slug.output.field}}` refs — replace slugs with node UUIDs so the
+            # runtime resolver can find the upstream node.
+            if 'path' in node_config:
+                runtime_config['path'] = _replace_slugs_with_uuids(
+                    node_config['path'], slug_to_uuid
+                )
         # human_review, llm_call, rag_agent, file_upload — all data in parameters only
 
         # Build node payload with correct schema

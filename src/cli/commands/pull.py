@@ -262,6 +262,9 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
         'extractionMethod': None,
         'prompt': None,
     },
+    'MEMORY_FILE_URL': {
+        'path': None,
+    },
 }
 
 
