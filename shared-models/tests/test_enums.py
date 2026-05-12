@@ -19,10 +19,10 @@ from workflow_models.enums import (
 
 
 class TestNodeConfigType:
-    """NodeConfigType should have all 13 node types."""
+    """NodeConfigType should have all 14 node types (incl. CHAT_INPUT)."""
 
-    def test_has_13_values(self):
-        assert len(NodeConfigType) == 13
+    def test_has_14_values(self):
+        assert len(NodeConfigType) == 14
 
     def test_agent_nodes(self):
         assert NodeConfigType.AGENT == 'AGENT'
@@ -39,6 +39,7 @@ class TestNodeConfigType:
         assert NodeConfigType.PLAIN_TXT_INPUT == 'PLAIN_TXT_INPUT'
         assert NodeConfigType.STRUCTURED_INPUT == 'STRUCTURED_INPUT'
         assert NodeConfigType.FILE_UPLOAD == 'FILE_UPLOAD'
+        assert NodeConfigType.CHAT_INPUT == 'CHAT_INPUT'
 
     def test_output_sharing_nodes(self):
         assert NodeConfigType.MEMORY_FILE_URL == 'MEMORY_FILE_URL'

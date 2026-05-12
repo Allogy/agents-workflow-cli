@@ -26,6 +26,7 @@ class NodeConfigType(str, Enum):
     PLAIN_TXT_INPUT = 'PLAIN_TXT_INPUT'
     STRUCTURED_INPUT = 'STRUCTURED_INPUT'
     FILE_UPLOAD = 'FILE_UPLOAD'
+    CHAT_INPUT = 'CHAT_INPUT'
 
     # Output / sharing nodes
     MEMORY_FILE_URL = 'MEMORY_FILE_URL'
