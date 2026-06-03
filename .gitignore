@@ -16,6 +16,7 @@ ENV/
 
 # uv
 .python-version
+document-parsing/uv.lock
 
 # IDE
 .idea/

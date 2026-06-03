@@ -204,6 +204,111 @@ class TestDoclingServeDocumentParserParse:
             parser.parse(b'hello world', 'readme.txt')
         mock_post.assert_not_called()
         assert parser.last_doctags == ''
+
+    def test_captures_last_markdown_and_json(self):
+        # parse() should stash md_content and json_content for sidecar preservation.
+        parser = DoclingServeDocumentParser(url=BASE_URL)
+        result_response = {
+            'document': {**_MINIMAL_DOCLING_DOCUMENT, 'md_content': '# Hello\n\nWorld'},
+            'status': 'success',
+            'errors': [],
+            'processing_time': 1.5,
+        }
+        with (
+            patch('requests.post', return_value=_mock_post_submit()),
+            patch(
+                'requests.get',
+                side_effect=_mock_get_side_effect([_TASK_STATUS_SUCCESS], result_response),
+            ),
+        ):
+            parser.parse(b'%PDF-1.4', 'doc.pdf')
+        assert parser.last_markdown == '# Hello\n\nWorld'
+        assert parser.last_json == _MINIMAL_DOCLING_DOCUMENT['json_content']
+
+    def test_last_markdown_and_json_reset_for_text_bypass(self):
+        # Text-format bypass returns without a Docling call → no stale artifacts.
+        parser = DoclingServeDocumentParser(url=BASE_URL)
+        parser.last_markdown = '# stale'
+        parser.last_json = {'stale': True}
+        with patch('requests.post') as mock_post:
+            parser.parse(b'hello world', 'readme.txt')
+        mock_post.assert_not_called()
+        assert parser.last_markdown == ''
+        assert parser.last_json is None
+
+    def test_page_batched_merge_joins_markdown_and_collects_json(self):
+        # Page-batched PDFs: markdown parts joined with blank lines; JSON
+        # parts collected into a LIST (DoclingDocument JSON can't be
+        # concatenated).
+        parser = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=2)
+        batch_docs = [
+            {
+                **_MINIMAL_DOCLING_DOCUMENT,
+                'md_content': '# Part 1',
+                'json_content': {**_MINIMAL_DOCLING_DOCUMENT['json_content'], 'name': 'p1'},
+            },
+            {
+                **_MINIMAL_DOCLING_DOCUMENT,
+                'md_content': '# Part 2',
+                'json_content': {**_MINIMAL_DOCLING_DOCUMENT['json_content'], 'name': 'p2'},
+            },
+        ]
+        result_iter = iter(
+            {'document': doc, 'status': 'success', 'errors': [], 'processing_time': 1.0}
+            for doc in batch_docs
+        )
+
+        def get_side_effect(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            if '/status/poll/' in url:
+                mock_resp.json.return_value = _TASK_STATUS_SUCCESS
+            else:
+                mock_resp.json.return_value = next(result_iter)
+            return mock_resp
+
+        with (
+            patch('document_parsing.docling_adapter._count_pdf_pages', return_value=4),
+            patch('requests.post', return_value=_mock_post_submit()),
+            patch('requests.get', side_effect=get_side_effect),
+        ):
+            parser.parse(b'%PDF-1.4', 'doc.pdf')
+
+        assert parser.last_markdown == '# Part 1\n\n# Part 2'
+        assert isinstance(parser.last_json, list)
+        assert [d['name'] for d in parser.last_json] == ['p1', 'p2']
+
+    def test_successful_batches_with_zero_elements_does_not_raise(self):
+        # A PDF whose pages parse successfully but yield no extractable
+        # elements (e.g. image-only scan) must return [] rather than raise —
+        # DoclingConversionError is reserved for actual batch failures.
+        parser = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=2)
+        empty_doc = {**_MINIMAL_DOCLING_DOCUMENT, 'doctags_content': ''}
+        result_response = {
+            'document': empty_doc,
+            'status': 'success',
+            'errors': [],
+            'processing_time': 1.0,
+        }
+
+        def get_side_effect(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            if '/status/poll/' in url:
+                mock_resp.json.return_value = _TASK_STATUS_SUCCESS
+            else:
+                mock_resp.json.return_value = result_response
+            return mock_resp
+
+        with (
+            patch('document_parsing.docling_adapter._count_pdf_pages', return_value=4),
+            patch('requests.post', return_value=_mock_post_submit()),
+            patch('requests.get', side_effect=get_side_effect),
+        ):
+            result = parser.parse(b'%PDF-1.4', 'image-only.pdf')
+        assert result == []
+
+    def test_http_422_raises_immediately_without_retry(self):
         parser = DoclingServeDocumentParser(url=BASE_URL, max_retries=3)
         mock_response = MagicMock()
         mock_response.status_code = 422

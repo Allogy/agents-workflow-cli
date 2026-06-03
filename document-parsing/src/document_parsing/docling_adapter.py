@@ -148,6 +148,15 @@ class DoclingServeDocumentParser:
         # ``parse()`` to preserve Docling's native DocTags format as a sidecar
         # artifact. Reset at the start of each ``parse()`` call.
         self.last_doctags: str = ''
+        # Markdown rendering and DoclingDocument JSON from the most recent
+        # successful parse. ``last_markdown`` is '' and ``last_json`` is None
+        # when the parse produced none (e.g. the text-format bypass). For
+        # page-batched PDFs, markdown parts are joined with blank lines and
+        # ``last_json`` is a LIST of per-batch DoclingDocument objects
+        # (DoclingDocument JSON cannot be concatenated). Reset at the start
+        # of each ``parse()`` call.
+        self.last_markdown: str = ''
+        self.last_json: dict[str, Any] | list[dict[str, Any]] | None = None
         # When > 0, PDFs are converted in page-range batches of this size
         # instead of one whole-document job. Each batch is an independent
         # Docling job, so a single un-renderable page (e.g. "cannot write
@@ -176,8 +185,10 @@ class DoclingServeDocumentParser:
             requests.exceptions.HTTPError: For 4xx client errors (not
                 retried).
         """
-        # Reset per-call DocTags capture.
+        # Reset per-call artifact capture.
         self.last_doctags = ''
+        self.last_markdown = ''
+        self.last_json = None
         # 1. File-size guard (50 MB limit)
         check_file_size(file_content, filename)
         # 2. Text-format bypass (.txt, .md, .csv)
@@ -193,8 +204,10 @@ class DoclingServeDocumentParser:
             return self._parse_in_page_batches(file_content, filename, params)
         # 5. Single whole-document conversion.
         response = self._call_with_retry(file_content, filename, params)
-        # Preserve Docling's native DocTags (sidecar), then map to elements.
+        # Preserve Docling's native outputs (sidecars), then map to elements.
         self.last_doctags = response.get('doctags_content') or ''
+        self.last_markdown = response.get('md_content') or ''
+        self.last_json = response.get('json_content') or None
         return map_docling_to_elements(response, filename)
 
     def _parse_in_page_batches(
@@ -210,8 +223,10 @@ class DoclingServeDocumentParser:
         ``page_range`` option — no physical PDF splitting). A batch that
         fails terminally (e.g. an un-renderable page) is logged and
         skipped, so one bad page only loses its batch rather than the whole
-        document. Element lists are concatenated in page order and DocTags
-        are joined into ``self.last_doctags``.
+        document. Element lists are concatenated in page order; DocTags are joined
+        into ``self.last_doctags``, markdown parts into ``self.last_markdown``, and
+        per-batch DoclingDocument JSON objects are collected as a list in
+        ``self.last_json``.
 
         Falls back to a single whole-document job when the page count
         cannot be determined.
@@ -221,6 +236,8 @@ class DoclingServeDocumentParser:
             # Small or uncountable — one job is fine.
             response = self._call_with_retry(file_content, filename, base_params)
             self.last_doctags = response.get('doctags_content') or ''
+            self.last_markdown = response.get('md_content') or ''
+            self.last_json = response.get('json_content') or None
             return map_docling_to_elements(response, filename)
 
         logger.info(
@@ -229,6 +246,8 @@ class DoclingServeDocumentParser:
         )
         all_elements: list[dict[str, Any]] = []
         doctags_parts: list[str] = []
+        md_parts: list[str] = []
+        json_parts: list[dict[str, Any]] = []
         failed_batches: list[str] = []
 
         for start in range(1, num_pages + 1, self.page_batch_size):
@@ -245,6 +264,10 @@ class DoclingServeDocumentParser:
                 all_elements.extend(elements)
                 if response.get('doctags_content'):
                     doctags_parts.append(response['doctags_content'])
+                if response.get('md_content'):
+                    md_parts.append(response['md_content'])
+                if response.get('json_content'):
+                    json_parts.append(response['json_content'])
                 logger.info(f'Batch {batch_label} of {filename}: {len(elements)} elements')
             except DoclingConversionError as e:
                 # Bad page in this batch — skip it, keep the rest.
@@ -254,13 +277,15 @@ class DoclingServeDocumentParser:
                 )
 
         self.last_doctags = '\n'.join(doctags_parts)
+        self.last_markdown = '\n\n'.join(md_parts)
+        self.last_json = json_parts or None
         if failed_batches:
             logger.warning(
                 f'{filename}: {len(failed_batches)} batch(es) skipped due to '
                 f'conversion failures: {", ".join(failed_batches)}. '
                 f'Produced {len(all_elements)} elements from the rest.'
             )
-        if not all_elements:
+        if not all_elements and failed_batches:
             raise DoclingConversionError(
                 f'All page batches failed for {filename} ({len(failed_batches)} batches)'
             )
