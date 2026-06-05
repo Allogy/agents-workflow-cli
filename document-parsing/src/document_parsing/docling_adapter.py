@@ -275,6 +275,17 @@ class DoclingServeDocumentParser:
                 logger.error(
                     f'Skipping batch {batch_label} of {filename} (terminal conversion failure): {e}'
                 )
+            except Exception as e:  # noqa: BLE001
+                # Any other per-batch error (e.g. Docling returned a success
+                # envelope with document=None after a page pipeline error, or a
+                # malformed result that fails element mapping). Skip this batch
+                # so one bad batch does not lose the whole document — the
+                # page-batched path is meant to be resilient (RAG-1660).
+                failed_batches.append(batch_label)
+                logger.error(
+                    f'Skipping batch {batch_label} of {filename} '
+                    f'(unexpected error during conversion/mapping): {e!r}'
+                )
 
         self.last_doctags = '\n'.join(doctags_parts)
         self.last_markdown = '\n\n'.join(md_parts)
@@ -640,7 +651,16 @@ def map_docling_to_elements(
         element schema.
     """
     elements: list[dict[str, Any]] = []
-    json_content = docling_response.get('json_content', {})
+    # Docling can return a "success" result whose document is None when the
+    # page pipeline errored (e.g. "Coordinate 'lower' is less than 'upper'",
+    # "cannot write empty image", or a VLM stop_reason=length truncation). In
+    # that case there is no parseable structure — return no elements rather
+    # than raising AttributeError on None.get (RAG-1660: one such batch was
+    # crashing the whole 638-page document despite other batches producing
+    # hundreds of elements).
+    if not docling_response:
+        return elements
+    json_content = docling_response.get('json_content') or {}
 
     # Build ref lookup: self_ref → item (from texts, tables, pictures)
     ref_lookup = _build_ref_lookup(json_content)
