@@ -64,6 +64,69 @@ TEXT_NATIVE_FORMATS: frozenset[str] = frozenset(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Canonical supported-format matrix (Docling-only)
+# ──────────────────────────────────────────────────────────────────────
+
+# THE single source of truth for which document formats the platform
+# ingests. Every consumer (upload validation, S3 document discovery,
+# chunking runners) MUST derive its allow-list from ``SUPPORTED_EXTENSIONS``
+# rather than maintaining its own list. All formats below are parsed by
+# Docling Serve; the legacy Unstructured backend is no longer part of the
+# chunking path.
+#
+# Grouped by Docling capability tier for documentation/UX. Keep this map
+# in lock-step with docs/SUPPORTED_FORMATS.md and the front-end import
+# matrix.
+SUPPORTED_FORMATS: dict[str, frozenset[str]] = {
+    # Rich documents — layout + OCR + table structure (PDFs may route to VLM).
+    'rich': frozenset({'.pdf', '.docx', '.pptx'}),
+    # Markup — structural text formats.
+    'markup': frozenset({'.md', '.markdown', '.html', '.htm', '.adoc', '.asciidoc', '.vtt'}),
+    # Tabular — spreadsheets and delimited text.
+    'tabular': frozenset({'.xlsx', '.csv'}),
+    # Image — rasters parsed via OCR / VLM.
+    'image': frozenset({'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}),
+    # Audio — transcribed via Docling's ASR pipeline.
+    # NOTE: requires the Docling Serve instance to have an ASR pipeline
+    # configured (separate ASR model). Until that infra is enabled these
+    # extensions are accepted/discovered but parsing will fail at runtime.
+    'audio': frozenset({'.mp3', '.wav'}),
+}
+
+# Flat allow-list of every supported extension across all tiers. This is
+# the canonical value consumers should import.
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    ext for exts in SUPPORTED_FORMATS.values() for ext in exts
+)
+
+# Full set of extensions the ingest pipeline accepts: the Docling matrix
+# PLUS text-native formats handled directly (``.txt`` has no structural
+# parser route but is decoded as UTF-8). Use this for upload validation,
+# S3 discovery, and the runner skip-guard so ``.txt`` is never rejected.
+INGESTABLE_EXTENSIONS: frozenset[str] = SUPPORTED_EXTENSIONS | DIRECT_PARSE_EXTENSIONS
+
+# Audio extensions depend on the Docling ASR pipeline being enabled.
+# Exposed separately so callers can gate audio behind a feature flag
+# without re-deriving the set.
+AUDIO_EXTENSIONS: frozenset[str] = SUPPORTED_FORMATS['audio']
+
+
+def is_supported_format(filename: str) -> bool:
+    """Return True if *filename* is an ingestable format.
+
+    Checks against ``INGESTABLE_EXTENSIONS`` — the Docling-supported matrix
+    plus text-native formats (``.txt`` etc.) that are decoded directly.
+
+    Args:
+        filename: Original filename or S3 key; only the suffix is examined.
+
+    Returns:
+        True when the lower-cased extension is ingestable.
+    """
+    return pathlib.Path(filename).suffix.lower() in INGESTABLE_EXTENSIONS
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Shared helpers
 # ──────────────────────────────────────────────────────────────────────
 

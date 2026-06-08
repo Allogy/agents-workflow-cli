@@ -24,9 +24,19 @@ from typing import Any
 
 import requests
 
-from document_parsing.utils import check_file_size, try_direct_parse
+from document_parsing.utils import (
+    SUPPORTED_FORMATS,
+    check_file_size,
+    try_direct_parse,
+)
 
 logger = logging.getLogger(__name__)
+
+# Extension groups used for per-format Docling pipeline selection. Derived
+# from the canonical SUPPORTED_FORMATS matrix so the adapter and the
+# ingest allow-list can never drift.
+_AUDIO_EXTS: frozenset[str] = SUPPORTED_FORMATS['audio']
+_IMAGE_EXTS: frozenset[str] = SUPPORTED_FORMATS['image']
 
 
 class DoclingConversionError(RuntimeError):
@@ -354,6 +364,18 @@ class DoclingServeDocumentParser:
         """
         ext = pathlib.Path(filename).suffix.lower()
 
+        # Audio formats: transcribe via Docling's ASR pipeline. OCR / table /
+        # VLM options do not apply — a speech-to-text model produces the
+        # transcript. Requires the Docling Serve instance to expose the ``asr``
+        # pipeline (separate ASR model); otherwise the conversion fails.
+        if ext in _AUDIO_EXTS:
+            return {
+                'to_formats': ['json', 'md', 'doctags'],
+                'pipeline': 'asr',
+                'document_timeout': str(self.document_timeout),
+                'abort_on_error': 'false',
+            }
+
         # VLM pipeline: delegate parsing to the vision model via the preset.
         if self.vlm_pipeline_preset:
             return {
@@ -380,9 +402,14 @@ class DoclingServeDocumentParser:
             'document_timeout': str(self.document_timeout),
             'abort_on_error': 'false',
         }
+        # PDFs and raster images both need OCR to recover text. Images are
+        # single-"page" rasters with no embedded text layer, so OCR is the
+        # only way to extract content under the standard pipeline.
         if ext == '.pdf':
             params['do_ocr'] = 'true'
             params['pdf_backend'] = 'dlparse_v2'
+        elif ext in _IMAGE_EXTS:
+            params['do_ocr'] = 'true'
         return params
 
     def _call_with_retry(

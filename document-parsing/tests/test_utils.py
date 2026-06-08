@@ -7,9 +7,14 @@ used by all document parsing adapters.
 import pytest
 
 from document_parsing.utils import (
+    AUDIO_EXTENSIONS,
     DIRECT_PARSE_EXTENSIONS,
+    INGESTABLE_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_FORMATS,
     check_file_size,
+    is_supported_format,
     sanitize_text,
     try_direct_parse,
 )
@@ -118,3 +123,71 @@ class TestSanitizeText:
 
     def test_empty_string_unchanged(self):
         assert sanitize_text('') == ''
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Supported-format matrix (canonical source of truth)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_supported_formats_matrix_tiers():
+    """The matrix exposes exactly the documented capability tiers."""
+    assert set(SUPPORTED_FORMATS.keys()) == {
+        'rich',
+        'markup',
+        'tabular',
+        'image',
+        'audio',
+    }
+
+
+def test_supported_extensions_matches_image_matrix():
+    """Every documented extension is present in the flat allow-list."""
+    expected = {
+        # rich
+        '.pdf', '.docx', '.pptx',
+        # markup
+        '.md', '.markdown', '.html', '.htm', '.adoc', '.asciidoc', '.vtt',
+        # tabular
+        '.xlsx', '.csv',
+        # image
+        '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp',
+        # audio
+        '.mp3', '.wav',
+    }
+    assert SUPPORTED_EXTENSIONS == frozenset(expected)
+
+
+def test_audio_extensions():
+    assert AUDIO_EXTENSIONS == frozenset({'.mp3', '.wav'})
+
+
+def test_ingestable_includes_text_native():
+    """INGESTABLE = matrix + text-native; .txt must be ingestable."""
+    assert '.txt' in INGESTABLE_EXTENSIONS
+    assert SUPPORTED_EXTENSIONS <= INGESTABLE_EXTENSIONS
+    assert DIRECT_PARSE_EXTENSIONS <= INGESTABLE_EXTENSIONS
+
+
+@pytest.mark.parametrize(
+    'filename',
+    [
+        'a.pdf', 'a.docx', 'a.pptx',
+        'a.md', 'a.markdown', 'a.html', 'a.htm', 'a.adoc', 'a.asciidoc', 'a.vtt',
+        'a.xlsx', 'a.csv',
+        'a.png', 'a.jpg', 'a.jpeg', 'a.tif', 'a.tiff', 'a.bmp', 'a.webp',
+        'a.mp3', 'a.wav',
+        'a.txt',
+        'UPPER.PDF', 'Mixed.DocX',
+    ],
+)
+def test_is_supported_format_accepts(filename):
+    assert is_supported_format(filename) is True
+
+
+@pytest.mark.parametrize(
+    'filename',
+    ['a.doc', 'a.ppt', 'a.xls', 'a.rtf', 'a.odt', 'a.exe', 'a.zip', 'noext'],
+)
+def test_is_supported_format_rejects_legacy_and_unknown(filename):
+    assert is_supported_format(filename) is False

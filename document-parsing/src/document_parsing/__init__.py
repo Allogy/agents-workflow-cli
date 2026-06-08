@@ -21,6 +21,13 @@ from document_parsing.docling_adapter import DoclingConversionError, DoclingServ
 from document_parsing.factory import create_document_parser
 from document_parsing.port import DocumentParserPort
 from document_parsing.unstructured_adapter import UnstructuredDocumentParser
+from document_parsing.utils import (
+    AUDIO_EXTENSIONS,
+    INGESTABLE_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_FORMATS,
+    is_supported_format,
+)
 
 __all__ = [
     'DocumentParserPort',
@@ -30,6 +37,11 @@ __all__ = [
     'UnstructuredDocumentParser',
     'DoclingConversionError',
     'HybridChunker',
+    'SUPPORTED_FORMATS',
+    'SUPPORTED_EXTENSIONS',
+    'INGESTABLE_EXTENSIONS',
+    'AUDIO_EXTENSIONS',
+    'is_supported_format',
 ]
 
 
