@@ -132,7 +132,7 @@ class TestDoclingServeDocumentParserParse:
         assert called_url == f'{BASE_URL}/v1/convert/file/async'
 
     def test_polls_until_terminal_status(self):
-        parser = DoclingServeDocumentParser(url=BASE_URL)
+        parser = DoclingServeDocumentParser(url=BASE_URL, poll_min_interval=0)
         poll_responses = [_TASK_STATUS_PENDING, _TASK_STATUS_PENDING, _TASK_STATUS_SUCCESS]
         with (
             patch('requests.post', return_value=_mock_post_submit()),
@@ -150,7 +150,7 @@ class TestDoclingServeDocumentParserParse:
         # Regression (RAG-1666): docling returns task_meta: null while a job is
         # pending; the poll loop must not crash on task_meta.get(...).
         null_meta_pending = {'task_id': 'abc-123', 'task_status': 'started', 'task_meta': None}
-        parser = DoclingServeDocumentParser(url=BASE_URL)
+        parser = DoclingServeDocumentParser(url=BASE_URL, poll_min_interval=0)
         with (
             patch('requests.post', return_value=_mock_post_submit()),
             patch(
@@ -175,13 +175,38 @@ class TestDoclingServeDocumentParserParse:
             result = parser.parse(b'%PDF-1.4', 'doc.pdf')
         assert isinstance(result, list)
 
-    def test_default_timeouts_sized_for_large_pdfs(self):
-        # Regression (RAG-1666): defaults must accommodate large VLM jobs and
-        # max_poll_seconds must exceed document_timeout.
+    def test_default_timeouts_bound_per_document_parse(self):
+        # Regression (issue 2026-06-08): a single wedged document must not be
+        # able to consume the whole Step Functions 120-min budget. Per-document
+        # parse timeout is bounded to 30 min and document_timeout is kept in
+        # lock-step so Docling drops un-processed pages at the same boundary.
         p = DoclingServeDocumentParser(url=BASE_URL)
-        assert p.document_timeout == 5400
-        assert p.max_poll_seconds == 6000
-        assert p.max_poll_seconds > p.document_timeout
+        assert p.document_timeout == 1800
+        assert p.max_poll_seconds == 1800
+        assert p.poll_min_interval == 5
+
+    def test_poll_loop_respects_min_interval_backoff_floor(self):
+        # Regression (issue 2026-06-08): when the upstream VLM is down the
+        # Docling poll endpoint can return immediately with status=started.
+        # Without a client-side backoff floor the loop spun at ~217 req/s.
+        # Verify the loop sleeps off the remaining time up to poll_min_interval.
+        parser = DoclingServeDocumentParser(url=BASE_URL, poll_min_interval=5)
+        poll_responses = [_TASK_STATUS_PENDING, _TASK_STATUS_PENDING, _TASK_STATUS_SUCCESS]
+        with (
+            patch('requests.post', return_value=_mock_post_submit()),
+            patch(
+                'requests.get',
+                side_effect=_mock_get_side_effect(poll_responses, _RESULT_RESPONSE),
+            ),
+            patch('time.sleep') as mock_sleep,
+        ):
+            parser.parse(b'%PDF-1.4', 'doc.pdf')
+        # Two non-terminal polls → two backoff sleeps; the terminal poll returns
+        # before sleeping. Each sleep is up to poll_min_interval (5s).
+        assert mock_sleep.call_count == 2
+        for call in mock_sleep.call_args_list:
+            slept = call.args[0]
+            assert 0 < slept <= 5
 
     def test_captures_last_doctags(self):
         # parse() should stash doctags_content for sidecar preservation (RAG-1666).
@@ -514,8 +539,9 @@ class TestGetParamsForFormat:
 
     def test_document_timeout_included(self):
         params = self.parser._get_params_for_format('doc.pdf')
-        # Default raised to 5400s (90 min) to fit large multi-hundred-page PDFs.
-        assert params.get('document_timeout') == '5400'
+        # Default bounded to 1800s (30 min) per-document parse timeout
+        # (issue 2026-06-08) so a wedged doc fails fast.
+        assert params.get('document_timeout') == '1800'
 
     def test_custom_document_timeout(self):
         parser = DoclingServeDocumentParser(url=BASE_URL, document_timeout=300)

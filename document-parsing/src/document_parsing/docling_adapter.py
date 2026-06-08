@@ -113,14 +113,22 @@ class DoclingServeDocumentParser:
         poll_wait: Seconds for the long-poll ``wait`` query parameter.
             The server holds the connection up to this many seconds
             before returning a still-pending status. Defaults to 30.
+        poll_min_interval: Minimum client-side seconds between successive
+            poll requests. Acts as a backoff floor so that if the server's
+            long-poll returns early (e.g. the upstream VLM is down and the
+            task is wedged at ``status=started``), the client does not spin
+            in a tight loop hammering Docling Serve. Defaults to 5.
         document_timeout: Server-side per-document processing timeout
             in seconds, passed as the ``document_timeout`` form field.
-            Defaults to 5400 (90 min) to accommodate large multi-hundred-page
-            PDFs through the VLM pipeline (per-page model calls). Docling
-            otherwise drops un-processed pages when this elapses.
-        max_poll_seconds: Maximum total wall-clock seconds to poll
-            before giving up. Covers queue wait + processing time. Must
-            exceed ``document_timeout``. Defaults to 6000 (100 minutes).
+            Defaults to 1800 (30 min). Docling drops un-processed pages when
+            this elapses. Kept in lock-step with ``max_poll_seconds`` so a
+            single hung document fails fast instead of consuming the whole
+            Step Functions 120-min budget.
+        max_poll_seconds: Maximum total wall-clock seconds to poll a single
+            document before giving up. Covers queue wait + processing time.
+            Defaults to 1800 (30 minutes) — a per-document parse timeout that
+            bounds the blast radius of a wedged parse (see [issue 2026-06-08]
+            in APPS.md).
     """
 
     def __init__(
@@ -128,14 +136,16 @@ class DoclingServeDocumentParser:
         url: str,
         max_retries: int = 3,
         poll_wait: int = 30,
-        document_timeout: int = 5400,
-        max_poll_seconds: int = 6000,
+        poll_min_interval: int = 5,
+        document_timeout: int = 1800,
+        max_poll_seconds: int = 1800,
         vlm_pipeline_preset: str | None = None,
         page_batch_size: int = 0,
     ):
         self.url = url
         self.max_retries = max_retries
         self.poll_wait = poll_wait
+        self.poll_min_interval = poll_min_interval
         self.document_timeout = document_timeout
         self.max_poll_seconds = max_poll_seconds
         # When set, use Docling's VLM pipeline with this preset (e.g.
@@ -525,10 +535,12 @@ class DoclingServeDocumentParser:
         start = time.time()
 
         while True:
-            elapsed = time.time() - start
+            iter_start = time.time()
+            elapsed = iter_start - start
             if elapsed > self.max_poll_seconds:
                 raise RuntimeError(
-                    f'Polling timed out for {filename} (task_id={task_id}) after {elapsed:.0f}s'
+                    f'Polling timed out for {filename} (task_id={task_id}) after {elapsed:.0f}s '
+                    f'(max_poll_seconds={self.max_poll_seconds})'
                 )
 
             resp = requests.get(
@@ -560,6 +572,18 @@ class DoclingServeDocumentParser:
                         f'whole document would re-incur model cost on the same error)'
                     )
                 return status_response
+
+            # Client-side backoff floor. The server-side long-poll (?wait=N)
+            # is supposed to block until there is a status change, but when the
+            # upstream VLM is down the task wedges at status=started and the
+            # poll endpoint can return immediately — without this floor the
+            # loop spins at hundreds of req/s and hammers Docling Serve
+            # (see [issue 2026-06-08] in APPS.md). Sleep off any time the
+            # request did not already consume, up to poll_min_interval.
+            iter_duration = time.time() - iter_start
+            remaining = self.poll_min_interval - iter_duration
+            if remaining > 0:
+                time.sleep(remaining)
 
     def _fetch_result(
         self,
