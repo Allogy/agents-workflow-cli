@@ -41,6 +41,7 @@ def create_document_parser(config: ParserConfig) -> DocumentParserPort:
             url=config.docling_serve_url,
             vlm_pipeline_preset=config.docling_vlm_pipeline_preset,
             page_batch_size=config.docling_page_batch_size,
+            max_parse_seconds=config.docling_max_parse_seconds,
         )
     from document_parsing.unstructured_adapter import UnstructuredDocumentParser
 

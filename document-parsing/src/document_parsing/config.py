@@ -28,9 +28,15 @@ class ParserConfig:
             batches of this size so a single un-renderable page only voids
             its own batch rather than the whole document. 0 disables
             batching (one whole-document job).
+        docling_max_parse_seconds: Hard wall-clock cap (seconds) for a single
+            document's parse across ALL Docling retry attempts. Bounds the
+            blast radius of a wedged parse (e.g. the 2026-06-08 ``.xlsx``
+            hang) so one bad file cannot consume the whole ingest budget by
+            being re-submitted on each retry. Defaults to 1800 (30 min).
     """
 
     docling_serve_url: str | None = None
     unstructured_api_url: str = 'http://unstructured:8000'
     docling_vlm_pipeline_preset: str | None = None
     docling_page_batch_size: int = 0
+    docling_max_parse_seconds: int = 1800

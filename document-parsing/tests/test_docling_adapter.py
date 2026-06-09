@@ -612,3 +612,121 @@ class TestHealthCheck:
         called_url = mock_get.call_args[0][0]
         assert called_url.endswith('/health')
         assert 'healthcheck' not in called_url
+
+
+class TestTabularImageHandling:
+    """RAG xlsx-hang: spreadsheets must NOT request embedded-image rendering.
+
+    The 2026-06-08 prod hang traced to Docling trying to render an embedded
+    WMF image in an .xlsx (``WMF file cannot be loaded by Pillow``), which
+    wedged the parse at status=started for ~66 min. For tabular formats we
+    keep table structure but turn image rendering off.
+    """
+
+    def test_xlsx_disables_embedded_images(self):
+        parser = DoclingServeDocumentParser(url=BASE_URL)
+        params = parser._get_params_for_format('AtNeed Rev Tracker.xlsx')
+        assert params['include_images'] == 'false'
+        assert params['image_export_mode'] == 'placeholder'
+        # Table structure is still extracted — that's the spreadsheet's value.
+        assert params['do_table_structure'] == 'true'
+        # No OCR/pdf-backend keys leak onto the tabular path.
+        assert 'do_ocr' not in params
+        assert 'pdf_backend' not in params
+
+    def test_pdf_still_renders_embedded_images(self):
+        # Regression guard: the tabular branch must not affect PDFs.
+        parser = DoclingServeDocumentParser(url=BASE_URL)
+        params = parser._get_params_for_format('doc.pdf')
+        assert params['include_images'] == 'true'
+        assert params['image_export_mode'] == 'embedded'
+        assert params['do_ocr'] == 'true'
+
+    def test_xlsx_parses_without_hanging(self):
+        # An .xlsx should flow through submit/poll/fetch like any other
+        # Docling job and return elements — bounded, no special-casing needed
+        # downstream.
+        parser = DoclingServeDocumentParser(url=BASE_URL, poll_min_interval=0)
+        with (
+            patch('requests.post', return_value=_mock_post_submit()),
+            patch(
+                'requests.get',
+                side_effect=_mock_get_side_effect([_TASK_STATUS_SUCCESS], _RESULT_RESPONSE),
+            ),
+        ):
+            result = parser.parse(b'PK\x03\x04fake-xlsx', 'Check Requests.xlsx')
+        assert isinstance(result, list)
+
+
+class TestWedgedParseTimeout:
+    """RAG xlsx-hang: a wedged parse must fail fast and NOT re-submit.
+
+    Before the fix, a poll timeout raised a plain RuntimeError that the retry
+    loop treated as transient -> the document was re-submitted under a fresh
+    task_id and stalled again (up to max_retries x max_poll_seconds). Now the
+    timeout is a terminal DoclingParseTimeout (subclass of
+    DoclingConversionError) and a cross-retry wall-clock deadline caps total
+    time on one document.
+    """
+
+    def test_poll_timeout_is_terminal_and_not_retried(self):
+        from document_parsing.docling_adapter import DoclingParseTimeout
+
+        # max_poll_seconds=0 -> the first poll iteration is already past the
+        # per-poll bound and raises DoclingParseTimeout immediately.
+        parser = DoclingServeDocumentParser(
+            url=BASE_URL,
+            poll_min_interval=0,
+            max_retries=3,
+            max_poll_seconds=0,
+        )
+        post_mock = MagicMock(return_value=_mock_post_submit())
+        with (
+            patch('requests.post', post_mock),
+            patch(
+                'requests.get',
+                side_effect=_mock_get_side_effect([_TASK_STATUS_PENDING], _RESULT_RESPONSE),
+            ),
+            patch('time.sleep'),  # don't actually sleep on (non-)backoff
+        ):
+            with pytest.raises(DoclingParseTimeout):
+                parser.parse(b'PK\x03\x04fake-xlsx', 'AtNeed Rev Tracker.xlsx')
+        # CRITICAL: exactly ONE submit. A wedged parse must not be
+        # re-submitted into another stall.
+        assert post_mock.call_count == 1
+
+    def test_parse_timeout_is_a_conversion_error_subclass(self):
+        # The runner catches DoclingConversionError to mark a doc FAILED and
+        # continue; DoclingParseTimeout must be caught by that same handler so
+        # one wedged xlsx does not fail the whole KB.
+        from document_parsing.docling_adapter import (
+            DoclingConversionError,
+            DoclingParseTimeout,
+        )
+
+        assert issubclass(DoclingParseTimeout, DoclingConversionError)
+
+    def test_cross_retry_deadline_blocks_resubmit(self):
+        # Even when each individual poll loop would pass, the per-document
+        # wall-clock budget must stop a fresh submit once exhausted.
+        from document_parsing.docling_adapter import DoclingParseTimeout
+
+        parser = DoclingServeDocumentParser(
+            url=BASE_URL,
+            poll_min_interval=0,
+            max_retries=3,
+            max_poll_seconds=10_000,
+            max_parse_seconds=0,  # budget already spent before attempt 1
+        )
+        post_mock = MagicMock(return_value=_mock_post_submit())
+        with (
+            patch('requests.post', post_mock),
+            patch(
+                'requests.get',
+                side_effect=_mock_get_side_effect([_TASK_STATUS_SUCCESS], _RESULT_RESPONSE),
+            ),
+        ):
+            with pytest.raises(DoclingParseTimeout):
+                parser.parse(b'PK\x03\x04fake-xlsx', 'Check Requests.xlsx')
+        # Deadline already passed -> not even one submit.
+        assert post_mock.call_count == 0

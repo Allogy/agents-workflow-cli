@@ -17,7 +17,11 @@ Public API:
 """
 
 from document_parsing.config import ParserConfig
-from document_parsing.docling_adapter import DoclingConversionError, DoclingServeDocumentParser
+from document_parsing.docling_adapter import (
+    DoclingConversionError,
+    DoclingParseTimeout,
+    DoclingServeDocumentParser,
+)
 from document_parsing.factory import create_document_parser
 from document_parsing.port import DocumentParserPort
 from document_parsing.unstructured_adapter import UnstructuredDocumentParser
@@ -36,6 +40,7 @@ __all__ = [
     'DoclingServeDocumentParser',
     'UnstructuredDocumentParser',
     'DoclingConversionError',
+    'DoclingParseTimeout',
     'HybridChunker',
     'SUPPORTED_FORMATS',
     'SUPPORTED_EXTENSIONS',

@@ -37,6 +37,15 @@ logger = logging.getLogger(__name__)
 # ingest allow-list can never drift.
 _AUDIO_EXTS: frozenset[str] = SUPPORTED_FORMATS['audio']
 _IMAGE_EXTS: frozenset[str] = SUPPORTED_FORMATS['image']
+# Spreadsheets/delimited text. ``.csv`` is direct-parsed before reaching
+# the adapter, so in practice this gates ``.xlsx``. These formats carry
+# their value in cell text + table structure, NOT in embedded pictures.
+# Requesting embedded-image export for them makes Docling try to render
+# every embedded object (e.g. a WMF clip-art) via Pillow; an
+# un-renderable image (``WMF file cannot be loaded by Pillow``) wedges the
+# parse at ``status=started`` indefinitely (see [issue 2026-06-08] xlsx
+# hang in APPS.md). We therefore skip image rendering for tabular formats.
+_TABULAR_EXTS: frozenset[str] = SUPPORTED_FORMATS['tabular']
 
 
 class DoclingConversionError(RuntimeError):
@@ -48,6 +57,22 @@ class DoclingConversionError(RuntimeError):
     hit the same error and re-incur per-page model cost, so the retry
     loop must NOT catch this. Distinct from transient errors (connection,
     read timeout, 5xx) which remain retryable.
+    """
+
+
+class DoclingParseTimeout(DoclingConversionError):
+    """Per-document parse exceeded its wall-clock budget — terminal.
+
+    Raised when a single document's parse (across ALL retry attempts) blows
+    past ``max_parse_seconds``, or when one poll loop exceeds
+    ``max_poll_seconds``. This is the signature of a wedged parse — e.g. the
+    2026-06-08 ``.xlsx`` hang, where Docling sat at ``status=started`` for
+    ~66 min, was abandoned, then re-submitted under a fresh ``task_id`` and
+    stalled again.
+
+    It subclasses ``DoclingConversionError`` so the retry loop treats it as
+    TERMINAL: a wedged document must fail fast and yield the budget to the
+    rest of the KB rather than re-submitting into another full-length stall.
     """
 
 
@@ -151,6 +176,7 @@ class DoclingServeDocumentParser:
         max_poll_seconds: int = 1800,
         vlm_pipeline_preset: str | None = None,
         page_batch_size: int = 0,
+        max_parse_seconds: int = 1800,
     ):
         self.url = url
         self.max_retries = max_retries
@@ -158,6 +184,19 @@ class DoclingServeDocumentParser:
         self.poll_min_interval = poll_min_interval
         self.document_timeout = document_timeout
         self.max_poll_seconds = max_poll_seconds
+        # Hard wall-clock cap for a single document across ALL retry
+        # attempts. ``max_poll_seconds`` bounds ONE poll loop, but a wedged
+        # parse that times out is re-submitted up to ``max_retries`` times —
+        # 3 × 30 min = 90 min of stall on one bad file (the 2026-06-08 xlsx
+        # hang). This deadline bounds the TOTAL time spent in ``parse()`` so
+        # the per-document blast radius is fixed regardless of retries.
+        # Defaults to 1800 (30 min) — keep ≥ max_poll_seconds so a single
+        # clean poll loop is never cut short by the cross-retry budget.
+        self.max_parse_seconds = max_parse_seconds
+        # Per-call deadline (epoch seconds); set at the start of each
+        # ``parse()`` and consulted before each submit attempt and on each
+        # poll iteration. None outside a parse call.
+        self._parse_deadline: float | None = None
         # When set, use Docling's VLM pipeline with this preset (e.g.
         # "bedrock-proxy" → VLM Proxy → Bedrock) instead of the local CPU
         # "standard" pipeline. The preset must exist on the Docling Serve
@@ -209,6 +248,8 @@ class DoclingServeDocumentParser:
         self.last_doctags = ''
         self.last_markdown = ''
         self.last_json = None
+        # Arm the cross-retry wall-clock deadline for this document.
+        self._parse_deadline = time.time() + self.max_parse_seconds
         # 1. File-size guard (50 MB limit)
         check_file_size(file_content, filename)
         # 2. Text-format bypass (.txt, .md, .csv)
@@ -402,6 +443,17 @@ class DoclingServeDocumentParser:
             'document_timeout': str(self.document_timeout),
             'abort_on_error': 'false',
         }
+        # Tabular formats (.xlsx): keep table structure but DO NOT render
+        # embedded images. Spreadsheets carry their value in cell text and
+        # tables, not pictures; requesting embedded-image export makes
+        # Docling render every embedded object via Pillow, and an
+        # un-renderable one (e.g. WMF clip-art) wedges the parse at
+        # status=started for the full timeout (the 2026-06-08 xlsx hang).
+        # No OCR/pdf-backend keys are added below for tabular formats.
+        if ext in _TABULAR_EXTS:
+            params['include_images'] = 'false'
+            params['image_export_mode'] = 'placeholder'
+            return params
         # PDFs and raster images both need OCR to recover text. Images are
         # single-"page" rasters with no embedded text layer, so OCR is the
         # only way to extract content under the standard pipeline.
@@ -463,6 +515,16 @@ class DoclingServeDocumentParser:
                 form_fields.append((key, str(value)))
 
         for attempt in range(1, self.max_retries + 1):
+            # Don't start a fresh submit if the per-document budget is spent.
+            # Backoff sleeps + a prior poll loop can push us past the deadline;
+            # re-submitting here is exactly the "abandoned then re-submitted
+            # and stalled again" symptom we are eliminating.
+            if self._parse_deadline is not None and time.time() > self._parse_deadline:
+                raise DoclingParseTimeout(
+                    f'Per-document parse budget exhausted for {filename} before attempt '
+                    f'{attempt}/{self.max_retries} (max_parse_seconds={self.max_parse_seconds}). '
+                    f'Not re-submitting a wedged document.'
+                )
             try:
                 task_id = self._submit_async(file_content, filename, form_fields, attempt)
                 self._poll_until_complete(task_id, filename)
@@ -470,9 +532,10 @@ class DoclingServeDocumentParser:
 
             except DoclingConversionError:
                 # Deterministic, terminal conversion failure (e.g. an
-                # un-renderable page). Retrying re-renders the whole document
-                # and re-incurs per-page model cost for the same outcome —
-                # fail fast instead.
+                # un-renderable page) OR a wedged-parse timeout
+                # (DoclingParseTimeout). Retrying re-renders the whole
+                # document, re-incurs per-page model cost, and — for a wedged
+                # parse — would just stall again. Fail fast instead.
                 logger.error(
                     f'Non-retryable Docling conversion failure for {filename} '
                     f'(attempt {attempt}/{self.max_retries}); not retrying.'
@@ -564,10 +627,20 @@ class DoclingServeDocumentParser:
         while True:
             iter_start = time.time()
             elapsed = iter_start - start
+            # Per-poll-loop bound.
             if elapsed > self.max_poll_seconds:
-                raise RuntimeError(
+                raise DoclingParseTimeout(
                     f'Polling timed out for {filename} (task_id={task_id}) after {elapsed:.0f}s '
-                    f'(max_poll_seconds={self.max_poll_seconds})'
+                    f'(max_poll_seconds={self.max_poll_seconds}). Treating as a wedged parse — '
+                    f'failing fast (non-retryable) instead of re-submitting into another stall.'
+                )
+            # Cross-retry wall-clock bound: a wedged parse must not consume
+            # more than max_parse_seconds total even across re-submits.
+            if self._parse_deadline is not None and iter_start > self._parse_deadline:
+                raise DoclingParseTimeout(
+                    f'Per-document parse budget exhausted for {filename} '
+                    f'(task_id={task_id}) after ~{self.max_parse_seconds}s total across retries '
+                    f'(max_parse_seconds={self.max_parse_seconds}). Failing fast (non-retryable).'
                 )
 
             resp = requests.get(
