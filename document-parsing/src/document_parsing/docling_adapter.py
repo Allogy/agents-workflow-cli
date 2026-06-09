@@ -16,10 +16,12 @@ expects, enabling transparent backend switching without downstream
 changes.
 """
 
+import concurrent.futures
 import io
 import logging
 import pathlib
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -74,6 +76,25 @@ class DoclingParseTimeout(DoclingConversionError):
     TERMINAL: a wedged document must fail fast and yield the budget to the
     rest of the KB rather than re-submitting into another full-length stall.
     """
+
+
+@dataclass(frozen=True)
+class _BatchResult:
+    """Outcome of converting a single ``page_range`` batch.
+
+    ``start_page`` is the 1-indexed first page of the batch and is used to
+    reassemble batch outputs in strict page order regardless of the order in
+    which batches complete under concurrent execution. ``failed_label`` is
+    set (to the batch label) when the batch failed and produced no usable
+    output; the other fields are then empty/None.
+    """
+
+    start_page: int
+    elements: list[dict[str, Any]]
+    doctags: str | None
+    md: str | None
+    json: dict[str, Any] | None
+    failed_label: str | None
 
 
 def _count_pdf_pages(file_content: bytes) -> int | None:
@@ -176,6 +197,7 @@ class DoclingServeDocumentParser:
         max_poll_seconds: int = 1800,
         vlm_pipeline_preset: str | None = None,
         page_batch_size: int = 0,
+        page_batch_concurrency: int = 1,
         max_parse_seconds: int = 1800,
     ):
         self.url = url
@@ -223,6 +245,14 @@ class DoclingServeDocumentParser:
         # still produces chunks. Uses Docling's native ``page_range`` option.
         # 0 disables batching (single whole-document job).
         self.page_batch_size = page_batch_size
+        # Number of ``page_range`` batches to convert concurrently. 1 preserves
+        # the current strictly-sequential behavior (submit → poll → next), the
+        # safe default. Higher values submit that many batches in parallel via a
+        # thread pool to keep the VLM GPU fed — the GPU is compute-starved (it
+        # idles between sequential batches), so concurrent submission is the
+        # highest-ROI throughput win with no infra change. Output page order is
+        # preserved regardless of completion order.
+        self.page_batch_concurrency = max(1, page_batch_concurrency)
 
     def parse(self, file_content: bytes, filename: str) -> list[dict[str, Any]]:
         """Parse a document and return Unstructured-compatible element dicts.
@@ -303,50 +333,59 @@ class DoclingServeDocumentParser:
 
         logger.info(
             f'Page-batched conversion for {filename}: {num_pages} pages '
-            f'in batches of {self.page_batch_size}'
+            f'in batches of {self.page_batch_size} '
+            f'(concurrency={self.page_batch_concurrency})'
         )
-        all_elements: list[dict[str, Any]] = []
-        doctags_parts: list[str] = []
-        md_parts: list[str] = []
-        json_parts: list[dict[str, Any]] = []
-        failed_batches: list[str] = []
 
+        # Build the (start_page, params, label) work list in page order.
+        batches: list[tuple[int, dict[str, Any], str]] = []
         for start in range(1, num_pages + 1, self.page_batch_size):
             end = min(start + self.page_batch_size - 1, num_pages)
             batch_params = dict(base_params)
             # Docling page_range is 1-indexed, inclusive: [start, end].
             batch_params['page_range'] = [start, end]
-            batch_label = f'pages {start}-{end}'
-            try:
-                response = self._call_with_retry(
-                    file_content, f'{filename} ({batch_label})', batch_params
+            batches.append((start, batch_params, f'pages {start}-{end}'))
+
+        if self.page_batch_concurrency <= 1:
+            # Strictly sequential: submit → poll to completion → next.
+            results = [
+                self._convert_one_batch(file_content, filename, params, label, start)
+                for start, params, label in batches
+            ]
+        else:
+            # Submit up to ``page_batch_concurrency`` batches in parallel so the
+            # VLM GPU does not idle between batches. ``requests`` is blocking, so
+            # threads (not asyncio) are the right tool. Results are reassembled
+            # in page order below — completion order is irrelevant.
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.page_batch_concurrency
+            ) as executor:
+                results = list(
+                    executor.map(
+                        lambda b: self._convert_one_batch(file_content, filename, b[1], b[2], b[0]),
+                        batches,
+                    )
                 )
-                elements = map_docling_to_elements(response, filename)
-                all_elements.extend(elements)
-                if response.get('doctags_content'):
-                    doctags_parts.append(response['doctags_content'])
-                if response.get('md_content'):
-                    md_parts.append(response['md_content'])
-                if response.get('json_content'):
-                    json_parts.append(response['json_content'])
-                logger.info(f'Batch {batch_label} of {filename}: {len(elements)} elements')
-            except DoclingConversionError as e:
-                # Bad page in this batch — skip it, keep the rest.
-                failed_batches.append(batch_label)
-                logger.error(
-                    f'Skipping batch {batch_label} of {filename} (terminal conversion failure): {e}'
-                )
-            except Exception as e:  # noqa: BLE001
-                # Any other per-batch error (e.g. Docling returned a success
-                # envelope with document=None after a page pipeline error, or a
-                # malformed result that fails element mapping). Skip this batch
-                # so one bad batch does not lose the whole document — the
-                # page-batched path is meant to be resilient (RAG-1660).
-                failed_batches.append(batch_label)
-                logger.error(
-                    f'Skipping batch {batch_label} of {filename} '
-                    f'(unexpected error during conversion/mapping): {e!r}'
-                )
+
+        # Reassemble in strict page order (sort by start_page), NOT completion
+        # order, so the output is identical to the sequential path.
+        results.sort(key=lambda r: r.start_page)
+        all_elements: list[dict[str, Any]] = []
+        doctags_parts: list[str] = []
+        md_parts: list[str] = []
+        json_parts: list[dict[str, Any]] = []
+        failed_batches: list[str] = []
+        for result in results:
+            if result.failed_label is not None:
+                failed_batches.append(result.failed_label)
+                continue
+            all_elements.extend(result.elements)
+            if result.doctags:
+                doctags_parts.append(result.doctags)
+            if result.md:
+                md_parts.append(result.md)
+            if result.json:
+                json_parts.append(result.json)
 
         self.last_doctags = '\n'.join(doctags_parts)
         self.last_markdown = '\n\n'.join(md_parts)
@@ -362,6 +401,63 @@ class DoclingServeDocumentParser:
                 f'All page batches failed for {filename} ({len(failed_batches)} batches)'
             )
         return all_elements
+
+    def _convert_one_batch(
+        self,
+        file_content: bytes,
+        filename: str,
+        batch_params: dict[str, Any],
+        batch_label: str,
+        start_page: int,
+    ) -> _BatchResult:
+        """Convert a single ``page_range`` batch, never raising on failure.
+
+        Calls ``_call_with_retry`` for this batch's ``page_range`` and maps the
+        response to elements. A terminal ``DoclingConversionError`` (bad page)
+        or any other per-batch error (e.g. a success envelope with
+        ``document=None``, or a malformed result that fails element mapping) is
+        caught and logged, and the batch is recorded as failed via
+        ``failed_label`` — one bad batch does not lose the whole document
+        (RAG-1660). This makes the helper safe to run from a thread pool: it
+        returns a structured ``_BatchResult`` instead of propagating exceptions.
+        """
+        try:
+            response = self._call_with_retry(
+                file_content, f'{filename} ({batch_label})', batch_params
+            )
+            elements = map_docling_to_elements(response, filename)
+            logger.info(f'Batch {batch_label} of {filename}: {len(elements)} elements')
+            return _BatchResult(
+                start_page=start_page,
+                elements=elements,
+                doctags=response.get('doctags_content') or None,
+                md=response.get('md_content') or None,
+                json=response.get('json_content') or None,
+                failed_label=None,
+            )
+        except DoclingConversionError as e:
+            # Bad page in this batch — skip it, keep the rest.
+            logger.error(
+                f'Skipping batch {batch_label} of {filename} (terminal conversion failure): {e}'
+            )
+        except Exception as e:  # noqa: BLE001
+            # Any other per-batch error (e.g. Docling returned a success
+            # envelope with document=None after a page pipeline error, or a
+            # malformed result that fails element mapping). Skip this batch
+            # so one bad batch does not lose the whole document — the
+            # page-batched path is meant to be resilient (RAG-1660).
+            logger.error(
+                f'Skipping batch {batch_label} of {filename} '
+                f'(unexpected error during conversion/mapping): {e!r}'
+            )
+        return _BatchResult(
+            start_page=start_page,
+            elements=[],
+            doctags=None,
+            md=None,
+            json=None,
+            failed_label=batch_label,
+        )
 
     def health_check(self) -> dict[str, Any]:
         """Probe the Docling Serve health endpoint.

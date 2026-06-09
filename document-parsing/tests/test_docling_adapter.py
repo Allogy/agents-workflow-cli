@@ -3,12 +3,16 @@
 Element mapper tests are in test_element_mapper.py.
 """
 
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from document_parsing.docling_adapter import DoclingServeDocumentParser
+from document_parsing.docling_adapter import (
+    DoclingConversionError,
+    DoclingServeDocumentParser,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -512,6 +516,94 @@ class TestPageBatching:
             parser.parse(b'%PDF-1.4', 'small.pdf')
         # 10 pages <= batch 50 → single job, no page_range.
         assert calls == [None]
+
+
+class TestPageBatchConcurrency:
+    """Concurrent page-range batch conversion (GPU-throughput win).
+
+    ``page_batch_concurrency`` submits N batches in parallel to keep the VLM
+    GPU fed, but output page order MUST be identical to the sequential path.
+    These tests mock the per-batch HTTP call and the element mapper.
+    """
+
+    @staticmethod
+    def _run(parser, *, fail_range=None):
+        """Run a 6-page / batch-2 PDF, returning the parsed elements.
+
+        Per-batch ``_call_with_retry`` is faked to encode the batch's start
+        page and to sleep so that the FIRST-submitted batch completes LAST —
+        this forces completion order to differ from page order, exercising the
+        page-order reassembly under concurrency. The element mapper is faked to
+        emit one element whose text is the batch's start page.
+        """
+
+        def fake_call(file_content, filename, params):
+            page_range = params['page_range']
+            start = page_range[0]
+            if fail_range is not None and page_range == fail_range:
+                raise DoclingConversionError(f'bad page in batch {page_range}')
+            # Earlier batches sleep longer → they finish last under concurrency.
+            time.sleep(0.05 * (7 - start))
+            return {'doctags_content': f'<doctag>d{start}</doctag>', 'pr_start': start}
+
+        with (
+            patch.object(parser, '_call_with_retry', side_effect=fake_call),
+            patch(
+                'document_parsing.docling_adapter.map_docling_to_elements',
+                side_effect=lambda response, filename: [
+                    {'type': 'NarrativeText', 'text': str(response['pr_start'])}
+                ],
+            ),
+            patch('document_parsing.docling_adapter._count_pdf_pages', return_value=6),
+        ):
+            return parser.parse(b'%PDF-1.4', 'big.pdf')
+
+    def test_concurrent_preserves_page_order(self):
+        seq = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=2, page_batch_concurrency=1)
+        conc = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=2, page_batch_concurrency=3)
+
+        seq_order = [e['text'] for e in self._run(seq)]
+        conc_order = [e['text'] for e in self._run(conc)]
+
+        # 6 pages, batch 2 → start pages 1, 3, 5 in strict page order.
+        assert seq_order == ['1', '3', '5']
+        # Concurrency must NOT reorder by completion — identical to sequential.
+        assert conc_order == seq_order
+        # DocTags reassembled in page order too.
+        assert (
+            seq.last_doctags
+            == conc.last_doctags
+            == '<doctag>d1</doctag>\n<doctag>d3</doctag>\n<doctag>d5</doctag>'
+        )
+
+    def test_concurrent_failed_batch_skipped_others_kept(self):
+        parser = DoclingServeDocumentParser(
+            url=BASE_URL, page_batch_size=2, page_batch_concurrency=3
+        )
+        with patch('document_parsing.docling_adapter.logger') as mock_logger:
+            elements = self._run(parser, fail_range=[3, 4])
+        # Batches [1,2] and [5,6] succeed; [3,4] skipped → 2 elements, in order.
+        assert [e['text'] for e in elements] == ['1', '5']
+        # The failed-batch warning path still triggers (same as sequential).
+        warning_msgs = [str(c.args[0]) for c in mock_logger.warning.call_args_list if c.args]
+        assert any('batch(es) skipped' in m for m in warning_msgs)
+
+    def test_concurrency_one_uses_sequential_path(self):
+        # Regression guard: concurrency=1 must NOT spin up a thread pool.
+        parser = DoclingServeDocumentParser(
+            url=BASE_URL, page_batch_size=2, page_batch_concurrency=1
+        )
+        with patch('concurrent.futures.ThreadPoolExecutor') as mock_executor:
+            elements = self._run(parser)
+        mock_executor.assert_not_called()
+        assert [e['text'] for e in elements] == ['1', '3', '5']
+
+    def test_concurrency_clamped_to_minimum_one(self):
+        # A non-positive value must be clamped to 1 (safe sequential default).
+        parser = DoclingServeDocumentParser(
+            url=BASE_URL, page_batch_size=2, page_batch_concurrency=0
+        )
+        assert parser.page_batch_concurrency == 1
 
 
 class TestGetParamsForFormat:

@@ -28,6 +28,11 @@ class ParserConfig:
             batches of this size so a single un-renderable page only voids
             its own batch rather than the whole document. 0 disables
             batching (one whole-document job).
+        docling_page_batch_concurrency: Number of ``page_range`` batches to
+            convert concurrently. 1 = strictly sequential (submit → poll →
+            next), the safe default. >1 parallelizes page-batch submission via
+            a thread pool to keep the VLM GPU fed (it idles between sequential
+            batches). Output page order is preserved regardless of concurrency.
         docling_max_parse_seconds: Hard wall-clock cap (seconds) for a single
             document's parse across ALL Docling retry attempts. Bounds the
             blast radius of a wedged parse (e.g. the 2026-06-08 ``.xlsx``
@@ -39,4 +44,5 @@ class ParserConfig:
     unstructured_api_url: str = 'http://unstructured:8000'
     docling_vlm_pipeline_preset: str | None = None
     docling_page_batch_size: int = 0
+    docling_page_batch_concurrency: int = 1
     docling_max_parse_seconds: int = 1800

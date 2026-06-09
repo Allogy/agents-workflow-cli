@@ -20,8 +20,8 @@ def create_document_parser(config: ParserConfig) -> DocumentParserPort:
 
     - When ``config.docling_serve_url`` is non-empty, returns a
       ``DoclingServeDocumentParser`` pointed at that URL, threading
-      ``docling_vlm_pipeline_preset`` and ``docling_page_batch_size``
-      through to the adapter.
+      ``docling_vlm_pipeline_preset``, ``docling_page_batch_size``, and
+      ``docling_page_batch_concurrency`` through to the adapter.
     - Otherwise returns an ``UnstructuredDocumentParser`` pointed at
       ``config.unstructured_api_url``.
 
@@ -41,6 +41,7 @@ def create_document_parser(config: ParserConfig) -> DocumentParserPort:
             url=config.docling_serve_url,
             vlm_pipeline_preset=config.docling_vlm_pipeline_preset,
             page_batch_size=config.docling_page_batch_size,
+            page_batch_concurrency=config.docling_page_batch_concurrency,
             max_parse_seconds=config.docling_max_parse_seconds,
         )
     from document_parsing.unstructured_adapter import UnstructuredDocumentParser
