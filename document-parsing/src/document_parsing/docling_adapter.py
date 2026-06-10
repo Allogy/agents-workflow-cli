@@ -491,6 +491,11 @@ class DoclingServeDocumentParser:
           PDF-backend options do not apply — the vision model performs the
           conversion — so only the VLM-relevant fields are sent.
 
+        Tabular formats (``.xlsx``, ``.csv``) always use the standard
+        pipeline with image rendering disabled, regardless of any VLM
+        preset: Docling parses them via its Excel/CSV backend, and
+        embedded-image export can wedge on un-renderable objects.
+
         Args:
             filename: Original filename; only the suffix is examined.
 
@@ -509,6 +514,28 @@ class DoclingServeDocumentParser:
             return {
                 'to_formats': ['json', 'md', 'doctags'],
                 'pipeline': 'asr',
+                'document_timeout': str(self.document_timeout),
+                'abort_on_error': 'false',
+            }
+
+        # Tabular formats (.xlsx, .csv): always the standard pipeline, never
+        # VLM. Spreadsheets carry their value in cell text and tables —
+        # Docling parses them via its Excel/CSV backend regardless of
+        # pipeline, so a vision model adds nothing. Crucially, image
+        # rendering stays OFF: requesting embedded-image export makes
+        # Docling render every embedded object via Pillow, and an
+        # un-renderable one (e.g. WMF clip-art) wedges the parse at
+        # status=started for the full timeout (the 2026-06-08 xlsx hang,
+        # which persisted under VLM presets until this check was hoisted
+        # above the VLM branch).
+        if ext in _TABULAR_EXTS:
+            return {
+                'to_formats': ['json', 'md', 'doctags'],
+                'do_table_structure': 'true',
+                'include_images': 'false',
+                'table_mode': 'accurate',
+                'pipeline': 'standard',
+                'image_export_mode': 'placeholder',
                 'document_timeout': str(self.document_timeout),
                 'abort_on_error': 'false',
             }
@@ -539,17 +566,6 @@ class DoclingServeDocumentParser:
             'document_timeout': str(self.document_timeout),
             'abort_on_error': 'false',
         }
-        # Tabular formats (.xlsx): keep table structure but DO NOT render
-        # embedded images. Spreadsheets carry their value in cell text and
-        # tables, not pictures; requesting embedded-image export makes
-        # Docling render every embedded object via Pillow, and an
-        # un-renderable one (e.g. WMF clip-art) wedges the parse at
-        # status=started for the full timeout (the 2026-06-08 xlsx hang).
-        # No OCR/pdf-backend keys are added below for tabular formats.
-        if ext in _TABULAR_EXTS:
-            params['include_images'] = 'false'
-            params['image_export_mode'] = 'placeholder'
-            return params
         # PDFs and raster images both need OCR to recover text. Images are
         # single-"page" rasters with no embedded text layer, so OCR is the
         # only way to extract content under the standard pipeline.

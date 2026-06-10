@@ -658,11 +658,16 @@ class TestGetParamsForFormat:
         assert 'table_mode' not in params
 
     def test_vlm_pipeline_independent_of_extension(self):
+        # All non-tabular extensions share the same VLM params. Tabular
+        # formats are the exception — they never use the VLM pipeline
+        # (see TestTabularImageHandling).
         parser = DoclingServeDocumentParser(url=BASE_URL, vlm_pipeline_preset='bedrock-proxy')
         pdf_params = parser._get_params_for_format('doc.pdf')
         docx_params = parser._get_params_for_format('doc.docx')
+        xlsx_params = parser._get_params_for_format('doc.xlsx')
         assert pdf_params['pipeline'] == 'vlm'
         assert pdf_params == docx_params
+        assert xlsx_params['pipeline'] == 'standard'
 
     def test_doctags_requested_in_both_pipelines(self):
         # DocTags must be requested so it can be preserved as a sidecar (RAG-1666).
@@ -733,6 +738,40 @@ class TestTabularImageHandling:
         assert params['include_images'] == 'true'
         assert params['image_export_mode'] == 'embedded'
         assert params['do_ocr'] == 'true'
+
+    def test_xlsx_uses_standard_pipeline_under_vlm_preset(self):
+        # A VLM preset must not re-enable image rendering for spreadsheets.
+        # The VLM branch used to return early for every extension, making
+        # the tabular override dead code in deployments with a preset set —
+        # an .xlsx with WMF clip-art then wedged exactly as in the standard
+        # -pipeline hang this class documents. Tabular formats always take
+        # the standard pipeline: Docling parses them via the Excel backend,
+        # so a vision model adds nothing.
+        parser = DoclingServeDocumentParser(url=BASE_URL, vlm_pipeline_preset='granite')
+        params = parser._get_params_for_format('CSNH + PFH 2025 PN Rev Tracker.xlsx')
+        assert params['pipeline'] == 'standard'
+        assert params['include_images'] == 'false'
+        assert params['image_export_mode'] == 'placeholder'
+        assert params['do_table_structure'] == 'true'
+        assert 'vlm_pipeline_preset' not in params
+
+    def test_csv_uses_standard_pipeline_under_vlm_preset(self):
+        parser = DoclingServeDocumentParser(url=BASE_URL, vlm_pipeline_preset='granite')
+        params = parser._get_params_for_format('export.csv')
+        assert params['pipeline'] == 'standard'
+        assert params['include_images'] == 'false'
+        assert params['image_export_mode'] == 'placeholder'
+        assert 'vlm_pipeline_preset' not in params
+
+    def test_pdf_still_uses_vlm_pipeline_under_preset(self):
+        # Regression guard: routing tabular formats away from the VLM
+        # pipeline must not affect PDFs, which are its intended audience.
+        parser = DoclingServeDocumentParser(url=BASE_URL, vlm_pipeline_preset='granite')
+        params = parser._get_params_for_format('doc.pdf')
+        assert params['pipeline'] == 'vlm'
+        assert params['vlm_pipeline_preset'] == 'granite'
+        assert params['include_images'] == 'true'
+        assert params['image_export_mode'] == 'embedded'
 
     def test_xlsx_parses_without_hanging(self):
         # An .xlsx should flow through submit/poll/fetch like any other
