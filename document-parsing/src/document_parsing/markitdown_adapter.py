@@ -20,7 +20,9 @@ else (PDF/DOCX/PPTX/images) to the primary Docling adapter.
 """
 
 import logging
+import os
 import pathlib
+import threading
 from io import BytesIO
 from typing import Any
 
@@ -34,6 +36,34 @@ logger = logging.getLogger(__name__)
 # short-circuits ``.csv`` before any external/structured parser is reached;
 # keeping it here makes the adapter correct even if called directly.
 MARKITDOWN_EXTENSIONS: frozenset[str] = frozenset({'.xlsx', '.xls', '.csv'})
+
+# Excel formats that are streamed cell-by-cell via openpyxl (read-only mode)
+# instead of MarkItDown's whole-workbook load. ``.csv`` is excluded — it is
+# already lightweight and is handled by MarkItDown directly.
+_EXCEL_EXTENSIONS: frozenset[str] = frozenset({'.xlsx', '.xls'})
+
+
+def _markitdown_concurrency() -> int:
+    """Return the max number of concurrent spreadsheet parses.
+
+    Reads ``MARKITDOWN_MAX_CONCURRENCY`` (default 1). Spreadsheet parsing
+    expands a zip-compressed workbook many-fold in memory, so even with a
+    higher document-level concurrency (``PGVECTOR_DOC_CONCURRENCY``) we cap
+    how many large workbooks may inflate simultaneously to avoid OOM-killing
+    the ingest container (prod 2026-06-12: 4 large ``.xlsx`` expanded at once
+    under ``PGVECTOR_DOC_CONCURRENCY=6`` and blew the 4 GB cap, exit 137).
+    """
+    try:
+        return max(1, int(os.environ.get('MARKITDOWN_MAX_CONCURRENCY', '1')))
+    except (TypeError, ValueError):
+        return 1
+
+
+# Module-level semaphore shared across ALL parser instances and worker
+# threads in a process. This is the memory guard: regardless of how many
+# documents the runner parses concurrently, at most ``MARKITDOWN_MAX_CONCURRENCY``
+# spreadsheets may inflate in memory at the same time. Sized once at import.
+_PARSE_SEMAPHORE = threading.BoundedSemaphore(_markitdown_concurrency())
 
 
 class MarkItDownConversionError(DoclingConversionError):
@@ -116,6 +146,53 @@ class MarkItDownDocumentParser:
                 runner marks the doc FAILED and continues (does not fail the KB).
         """
         ext = pathlib.Path(filename).suffix.lower()
+        # Gate the memory-heavy conversion behind the module-level semaphore so
+        # at most ``MARKITDOWN_MAX_CONCURRENCY`` workbooks inflate in memory at
+        # once, independent of the runner's document-level concurrency.
+        with _PARSE_SEMAPHORE:
+            if ext in _EXCEL_EXTENSIONS:
+                markdown, parser = self._parse_excel_streaming(file_content, filename, ext)
+            else:
+                markdown, parser = self._parse_with_markitdown(file_content, filename, ext)
+
+        markdown = sanitize_text((markdown or '').strip())
+        if not markdown:
+            logger.warning('%s produced no content for %s', parser, filename)
+            return []
+
+        logger.info(
+            '%s parsed %s: %d chars of markdown (no Docling/VLM)',
+            parser,
+            filename,
+            len(markdown),
+        )
+        return [
+            {
+                'type': 'Table',
+                'text': markdown,
+                'metadata': {
+                    'filename': filename,
+                    'text_as_html': markdown,
+                    'parser': parser,
+                },
+            }
+        ]
+
+    def _parse_with_markitdown(
+        self,
+        file_content: bytes,
+        filename: str,
+        ext: str,
+    ) -> tuple[str, str]:
+        """Convert *file_content* via MarkItDown (whole-stream load).
+
+        Used for ``.csv`` and as the fallback when streaming an Excel workbook
+        fails. Returns ``(markdown, 'markitdown')``.
+
+        Raises:
+            ImportError: If ``markitdown`` is not installed (operational error).
+            MarkItDownConversionError: On a terminal conversion failure.
+        """
         try:
             converter = self._get_converter()
             # MarkItDown infers type from the stream; passing the extension
@@ -133,28 +210,124 @@ class MarkItDownDocumentParser:
             raise MarkItDownConversionError(
                 f'MarkItDown failed to convert {filename}: {exc}'
             ) from exc
+        return (result.text_content or ''), 'markitdown'
 
-        markdown = sanitize_text((result.text_content or '').strip())
-        if not markdown:
-            logger.warning('MarkItDown produced no content for %s', filename)
-            return []
+    def _parse_excel_streaming(
+        self,
+        file_content: bytes,
+        filename: str,
+        ext: str,
+    ) -> tuple[str, str]:
+        """Stream an Excel workbook to Markdown with bounded memory.
 
-        logger.info(
-            'MarkItDown parsed %s: %d chars of markdown (no Docling/VLM)',
-            filename,
-            len(markdown),
-        )
-        return [
-            {
-                'type': 'Table',
-                'text': markdown,
-                'metadata': {
-                    'filename': filename,
-                    'text_as_html': markdown,
-                    'parser': 'markitdown',
-                },
-            }
-        ]
+        Unlike MarkItDown's ``convert_stream`` (which loads the entire
+        workbook and builds one large object graph), this reads each sheet via
+        ``openpyxl.load_workbook(read_only=True, data_only=True)`` and iterates
+        rows with ``iter_rows``, appending pipe-table Markdown incrementally.
+        openpyxl's read-only path is lazy and constant-memory, so peak memory
+        is bounded to a small row window plus the growing output string, rather
+        than the whole sheet materialized at once.
+
+        ``read_only=True`` uses openpyxl's lazy, constant-memory read path;
+        ``data_only=True`` returns cached cell values (not formulas). On any
+        failure (including a non-``.xlsx`` file openpyxl cannot read, e.g. a
+        legacy ``.xls``) it falls back to MarkItDown so behavior is never worse
+        than before.
+
+        Returns ``(markdown, 'openpyxl-stream')`` on success, or the MarkItDown
+        result on fallback.
+
+        Raises:
+            MarkItDownConversionError: Only if BOTH streaming and the MarkItDown
+                fallback fail terminally.
+        """
+        try:
+            import openpyxl
+        except ImportError:
+            # openpyxl ships with markitdown[xlsx]; if it is somehow absent,
+            # fall back to MarkItDown rather than failing the document.
+            logger.warning('openpyxl unavailable — falling back to MarkItDown for %s', filename)
+            return self._parse_with_markitdown(file_content, filename, ext)
+
+        # openpyxl only reads the OOXML ``.xlsx`` format. Legacy ``.xls`` is a
+        # different binary format — delegate those straight to MarkItDown.
+        if ext != '.xlsx':
+            return self._parse_with_markitdown(file_content, filename, ext)
+
+        try:
+            workbook = openpyxl.load_workbook(
+                BytesIO(file_content),
+                read_only=True,
+                data_only=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — fall back, don't fail yet
+            logger.warning(
+                'openpyxl could not open %s (%s) — falling back to MarkItDown',
+                filename,
+                exc,
+            )
+            return self._parse_with_markitdown(file_content, filename, ext)
+
+        try:
+            parts: list[str] = []
+            for sheet in workbook.worksheets:
+                rendered = self._render_sheet_markdown(sheet)
+                if rendered:
+                    parts.append(f'## {sheet.title}\n\n{rendered}')
+            markdown = '\n\n'.join(parts)
+        except Exception as exc:  # noqa: BLE001 — normalize to terminal error
+            raise MarkItDownConversionError(
+                f'openpyxl streaming failed for {filename}: {exc}'
+            ) from exc
+        finally:
+            # read_only workbooks hold an open zip handle — always close it.
+            workbook.close()
+
+        return markdown, 'openpyxl-stream'
+
+    @staticmethod
+    def _render_sheet_markdown(sheet: Any) -> str:
+        """Render one worksheet to a GitHub-flavored Markdown pipe table.
+
+        Streams rows via ``iter_rows`` so only a bounded window of cells is
+        materialized at a time. Trailing fully-empty rows/columns are trimmed.
+        The first non-empty row is treated as the header (matching MarkItDown's
+        spreadsheet rendering). Returns ``''`` for an empty sheet.
+
+        Args:
+            sheet: An openpyxl read-only worksheet.
+
+        Returns:
+            Markdown table text, or ``''`` when the sheet has no cells.
+        """
+
+        def _fmt(value: Any) -> str:
+            if value is None:
+                return ''
+            # Escape pipes so cell content never breaks the table structure.
+            return str(value).replace('\n', ' ').replace('|', '\\|').strip()
+
+        lines: list[str] = []
+        header_written = False
+        ncols = 0
+        for row in sheet.iter_rows(values_only=True):
+            cells = [_fmt(v) for v in row]
+            # Skip fully-empty rows to avoid emitting blank table lines.
+            if not any(cells):
+                continue
+            if not header_written:
+                ncols = len(cells)
+                lines.append('| ' + ' | '.join(cells) + ' |')
+                lines.append('| ' + ' | '.join(['---'] * ncols) + ' |')
+                header_written = True
+                continue
+            # Pad/truncate to the header width so the table stays rectangular.
+            if len(cells) < ncols:
+                cells = cells + [''] * (ncols - len(cells))
+            elif len(cells) > ncols:
+                cells = cells[:ncols]
+            lines.append('| ' + ' | '.join(cells) + ' |')
+        return '\n'.join(lines)
 
     def health_check(self) -> dict[str, Any]:
         """Report whether the ``markitdown`` dependency is importable.
