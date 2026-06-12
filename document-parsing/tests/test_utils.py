@@ -145,15 +145,32 @@ def test_supported_extensions_matches_image_matrix():
     """Every documented extension is present in the flat allow-list."""
     expected = {
         # rich
-        '.pdf', '.docx', '.pptx',
+        '.pdf',
+        '.docx',
+        '.pptx',
         # markup
-        '.md', '.markdown', '.html', '.htm', '.adoc', '.asciidoc', '.vtt',
+        '.md',
+        '.markdown',
+        '.html',
+        '.htm',
+        '.adoc',
+        '.asciidoc',
+        '.vtt',
         # tabular
-        '.xlsx', '.csv',
+        '.xlsx',
+        '.xls',
+        '.csv',
         # image
-        '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp',
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.tif',
+        '.tiff',
+        '.bmp',
+        '.webp',
         # audio
-        '.mp3', '.wav',
+        '.mp3',
+        '.wav',
     }
     assert SUPPORTED_EXTENSIONS == frozenset(expected)
 
@@ -172,13 +189,31 @@ def test_ingestable_includes_text_native():
 @pytest.mark.parametrize(
     'filename',
     [
-        'a.pdf', 'a.docx', 'a.pptx',
-        'a.md', 'a.markdown', 'a.html', 'a.htm', 'a.adoc', 'a.asciidoc', 'a.vtt',
-        'a.xlsx', 'a.csv',
-        'a.png', 'a.jpg', 'a.jpeg', 'a.tif', 'a.tiff', 'a.bmp', 'a.webp',
-        'a.mp3', 'a.wav',
+        'a.pdf',
+        'a.docx',
+        'a.pptx',
+        'a.md',
+        'a.markdown',
+        'a.html',
+        'a.htm',
+        'a.adoc',
+        'a.asciidoc',
+        'a.vtt',
+        'a.xlsx',
+        'a.xls',
+        'a.csv',
+        'a.png',
+        'a.jpg',
+        'a.jpeg',
+        'a.tif',
+        'a.tiff',
+        'a.bmp',
+        'a.webp',
+        'a.mp3',
+        'a.wav',
         'a.txt',
-        'UPPER.PDF', 'Mixed.DocX',
+        'UPPER.PDF',
+        'Mixed.DocX',
     ],
 )
 def test_is_supported_format_accepts(filename):
@@ -187,7 +222,7 @@ def test_is_supported_format_accepts(filename):
 
 @pytest.mark.parametrize(
     'filename',
-    ['a.doc', 'a.ppt', 'a.xls', 'a.rtf', 'a.odt', 'a.exe', 'a.zip', 'noext'],
+    ['a.doc', 'a.ppt', 'a.rtf', 'a.odt', 'a.exe', 'a.zip', 'noext'],
 )
 def test_is_supported_format_rejects_legacy_and_unknown(filename):
     assert is_supported_format(filename) is False

@@ -23,7 +23,13 @@ from document_parsing.docling_adapter import (
     DoclingServeDocumentParser,
 )
 from document_parsing.factory import create_document_parser
+from document_parsing.markitdown_adapter import (
+    MarkItDownConversionError,
+    MarkItDownDocumentParser,
+    is_markitdown_format,
+)
 from document_parsing.port import DocumentParserPort
+from document_parsing.routing_adapter import RoutingDocumentParser
 from document_parsing.unstructured_adapter import UnstructuredDocumentParser
 from document_parsing.utils import (
     AUDIO_EXTENSIONS,
@@ -39,6 +45,10 @@ __all__ = [
     'create_document_parser',
     'DoclingServeDocumentParser',
     'UnstructuredDocumentParser',
+    'MarkItDownDocumentParser',
+    'RoutingDocumentParser',
+    'MarkItDownConversionError',
+    'is_markitdown_format',
     'DoclingConversionError',
     'DoclingParseTimeout',
     'HybridChunker',

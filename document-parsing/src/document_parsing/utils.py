@@ -82,8 +82,9 @@ SUPPORTED_FORMATS: dict[str, frozenset[str]] = {
     'rich': frozenset({'.pdf', '.docx', '.pptx'}),
     # Markup — structural text formats.
     'markup': frozenset({'.md', '.markdown', '.html', '.htm', '.adoc', '.asciidoc', '.vtt'}),
-    # Tabular — spreadsheets and delimited text.
-    'tabular': frozenset({'.xlsx', '.csv'}),
+    # Tabular — spreadsheets and delimited text. (.xls/.xlsx route to
+    # MarkItDown, not Docling, via RoutingDocumentParser.)
+    'tabular': frozenset({'.xlsx', '.xls', '.csv'}),
     # Image — rasters parsed via OCR / VLM.
     'image': frozenset({'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}),
     # Audio — transcribed via Docling's ASR pipeline.

@@ -37,13 +37,42 @@ def create_document_parser(config: ParserConfig) -> DocumentParserPort:
     if config.docling_serve_url:
         from document_parsing.docling_adapter import DoclingServeDocumentParser
 
-        return DoclingServeDocumentParser(
+        primary: DocumentParserPort = DoclingServeDocumentParser(
             url=config.docling_serve_url,
             vlm_pipeline_preset=config.docling_vlm_pipeline_preset,
             page_batch_size=config.docling_page_batch_size,
             page_batch_concurrency=config.docling_page_batch_concurrency,
             max_parse_seconds=config.docling_max_parse_seconds,
         )
+        return _maybe_route_spreadsheets(primary, config)
     from document_parsing.unstructured_adapter import UnstructuredDocumentParser
 
-    return UnstructuredDocumentParser(url=config.unstructured_api_url)
+    return _maybe_route_spreadsheets(
+        UnstructuredDocumentParser(url=config.unstructured_api_url), config
+    )
+
+
+def _maybe_route_spreadsheets(
+    primary: DocumentParserPort,
+    config: ParserConfig,
+) -> DocumentParserPort:
+    """Wrap *primary* in a spreadsheet-routing parser when enabled.
+
+    When ``config.route_spreadsheets_to_markitdown`` is True, returns a
+    ``RoutingDocumentParser`` that sends ``.xlsx``/``.xls``/``.csv`` to
+    MarkItDown and everything else to *primary*. Otherwise returns *primary*
+    unchanged. The MarkItDown adapter is imported lazily so consumers that
+    never parse a spreadsheet do not pay for the dependency at import time.
+
+    Args:
+        primary: The non-tabular parser (Docling or Unstructured).
+        config: Resolved parser configuration.
+
+    Returns:
+        Either a ``RoutingDocumentParser`` or *primary* itself.
+    """
+    if not config.route_spreadsheets_to_markitdown:
+        return primary
+    from document_parsing.routing_adapter import RoutingDocumentParser
+
+    return RoutingDocumentParser(primary_parser=primary)

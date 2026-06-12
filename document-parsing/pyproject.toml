@@ -1,6 +1,6 @@
 [project]
 name = "agents-document-parsing"
-version = "0.2.2"
+version = "0.3.0"
 description = "Shared document parsing port, adapters (Docling Serve / Unstructured), and DocTags-aware HybridChunker for the Agents Platform"
 readme = "README.md"
 requires-python = ">=3.13,<4.0"
@@ -15,6 +15,11 @@ dependencies = [
     # here breaks chunking silently. Both the backend and kb-ingest-pipeline
     # images must resolve the same version.
     "docling-core>=2.20,<3.0",
+    # MarkItDown parses spreadsheets (.xlsx/.xls/.csv) locally via
+    # pandas/openpyxl — far faster and more reliable than routing tabular
+    # data through Docling's VLM pipeline (which fail-emptied them on prod
+    # after a 30-min timeout each). [xls] extra pulls xlrd for legacy .xls.
+    "markitdown[xls,xlsx]>=0.0.1a2",
 ]
 
 [build-system]

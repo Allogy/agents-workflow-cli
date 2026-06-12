@@ -38,6 +38,14 @@ class ParserConfig:
             blast radius of a wedged parse (e.g. the 2026-06-08 ``.xlsx``
             hang) so one bad file cannot consume the whole ingest budget by
             being re-submitted on each retry. Defaults to 1800 (30 min).
+        route_spreadsheets_to_markitdown: When True (default), spreadsheets
+            (``.xlsx``/``.xls``/``.csv``) are parsed locally via MarkItDown
+            (pandas/openpyxl) instead of Docling Serve. Spreadsheets carry no
+            layout/image content needing the VLM pipeline, and on prod they
+            fail-emptied after burning a full ``docling_max_parse_seconds``
+            slot each. MarkItDown extracts them in milliseconds with no VLM,
+            no network, and no per-document timeout. Set False to force all
+            formats through the primary (Docling) parser.
     """
 
     docling_serve_url: str | None = None
@@ -46,3 +54,4 @@ class ParserConfig:
     docling_page_batch_size: int = 0
     docling_page_batch_concurrency: int = 1
     docling_max_parse_seconds: int = 1800
+    route_spreadsheets_to_markitdown: bool = True
