@@ -1,6 +1,6 @@
 [project]
 name = "agents-document-parsing"
-version = "0.3.1"
+version = "0.3.2"
 description = "Shared document parsing port, adapters (Docling Serve / Unstructured), and DocTags-aware HybridChunker for the Agents Platform"
 readme = "README.md"
 requires-python = ">=3.13,<4.0"

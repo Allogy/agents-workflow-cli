@@ -324,12 +324,32 @@ class DoclingServeDocumentParser:
         """
         num_pages = _count_pdf_pages(file_content)
         if num_pages is None or num_pages <= self.page_batch_size:
-            # Small or uncountable — one job is fine.
-            response = self._call_with_retry(file_content, filename, base_params)
-            self.last_doctags = response.get('doctags_content') or ''
-            self.last_markdown = response.get('md_content') or ''
-            self.last_json = response.get('json_content') or None
-            return map_docling_to_elements(response, filename)
+            # Small or uncountable — one job is enough, but route it through
+            # ``_convert_one_batch`` so a terminal per-page failure (e.g. the
+            # granite VLM emitting a degenerate ``bbox[1]<=bbox[3]`` / zero-area
+            # box that trips Docling's layout assertion) is CAUGHT and returns
+            # an empty result instead of raising and dropping the whole
+            # document. This closes the single-job resilience gap: previously
+            # any PDF with <= page_batch_size pages bypassed the per-batch
+            # try/except entirely (RAG-1660 — ~30 small customer docs silently
+            # skipped on the 2026-06-08 prod ingest). The page label spans the
+            # whole document.
+            label = f'pages 1-{num_pages}' if num_pages else 'whole document'
+            result = self._convert_one_batch(
+                file_content, filename, base_params, label, start_page=1
+            )
+            self.last_doctags = result.doctags or ''
+            self.last_markdown = result.md or ''
+            self.last_json = [result.json] if result.json else None
+            if result.failed_label is not None:
+                # The single (whole-doc) batch failed terminally — surface it
+                # the same way the multi-batch path does, so the caller's
+                # DocumentParseError handling records a real (visible) failure
+                # rather than the helper raising mid-parse.
+                raise DoclingConversionError(
+                    f'Conversion failed for {filename} ({result.failed_label})'
+                )
+            return result.elements
 
         logger.info(
             f'Page-batched conversion for {filename}: {num_pages} pages '
