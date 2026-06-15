@@ -517,6 +517,53 @@ class TestPageBatching:
         # 10 pages <= batch 50 → single job, no page_range.
         assert calls == [None]
 
+    def test_small_pdf_single_job_failure_is_caught_not_crashed(self):
+        # RAG-1660: a small (<= page_batch_size) PDF whose single whole-doc
+        # job fails terminally (e.g. the granite VLM bbox[1]<=bbox[3] layout
+        # assertion) must be routed through _convert_one_batch so the failure
+        # is CAUGHT and surfaced as a clean DoclingConversionError, never an
+        # un-caught mid-parse crash. Previously this path bypassed the
+        # per-batch try/except and dropped the document.
+        from document_parsing.docling_adapter import DoclingConversionError
+
+        parser = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=50)
+        with (
+            patch.object(
+                parser,
+                '_call_with_retry',
+                side_effect=DoclingConversionError('bbox[1]<=bbox[3] => 849.0<=696.9'),
+            ),
+            patch(
+                'document_parsing.docling_adapter._count_pdf_pages',
+                return_value=10,
+            ),
+            pytest.raises(DoclingConversionError, match='Conversion failed for'),
+        ):
+            parser.parse(b'%PDF-1.4', 'small.pdf')
+
+    def test_small_pdf_single_job_preserves_artifacts(self):
+        # The resilient single-job path must still expose DocTags / markdown /
+        # json sidecars (last_doctags/last_markdown/last_json) on success, in
+        # the same list-shape the multi-batch path uses for last_json.
+        parser = DoclingServeDocumentParser(url=BASE_URL, page_batch_size=50)
+        with (
+            patch.object(parser, '_call_with_retry', return_value=self._resp('hello')),
+            patch(
+                'document_parsing.docling_adapter.map_docling_to_elements',
+                return_value=[{'type': 'NarrativeText', 'text': 'hello'}],
+            ),
+            patch(
+                'document_parsing.docling_adapter._count_pdf_pages',
+                return_value=3,
+            ),
+        ):
+            elements = parser.parse(b'%PDF-1.4', 'small.pdf')
+        assert len(elements) == 1
+        # _resp() populates doctags_content → exposed as last_doctags.
+        assert parser.last_doctags
+        # last_json is a list (one whole-doc batch), matching the multi-batch path.
+        assert parser.last_json is None or isinstance(parser.last_json, list)
+
 
 class TestPageBatchConcurrency:
     """Concurrent page-range batch conversion (GPU-throughput win).
