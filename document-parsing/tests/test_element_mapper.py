@@ -436,6 +436,30 @@ class TestMakeElement:
         assert el is not None
         assert el['type'] == 'Image'
 
+    def test_image_element_with_null_image_does_not_raise(self):
+        """Docling may emit ``"image": null`` (key present, value None).
+
+        Regression for ``AttributeError: 'NoneType' object has no attribute
+        'get'`` at docling_adapter.py _make_element. ``dict.get('image', {})``
+        does NOT fall back to ``{}`` when the value is explicitly None, so the
+        adapter must coerce None to ``{}``. Observed on dev pgvector ingest
+        (2026-06-17) failing 14/50 docs.
+        """
+        item = {'text': '', 'prov': [{'page_no': 1}], 'image': None}
+        el = _make_element(item, 'Image', 'doc.pdf')
+        assert el is not None
+        assert el['type'] == 'Image'
+        # No embedded bitmap -> no base64/filetype metadata, but no crash.
+        assert 'image_base64' not in el['metadata']
+
+    def test_image_element_with_absent_image_key_does_not_raise(self):
+        """Image element with the ``image`` key entirely absent must not raise."""
+        item = {'text': '', 'prov': [{'page_no': 1}]}
+        el = _make_element(item, 'Image', 'doc.pdf')
+        assert el is not None
+        assert el['type'] == 'Image'
+        assert 'image_base64' not in el['metadata']
+
     def test_filename_always_in_metadata(self):
         item = {'text': 'Content', 'prov': []}
         el = _make_element(item, 'Title', 'myfile.pdf')

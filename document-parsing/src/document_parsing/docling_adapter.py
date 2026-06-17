@@ -1004,7 +1004,11 @@ def _make_element(
         metadata['text_as_html'] = _table_to_html(item)
 
     elif element_type == 'Image':
-        image_data = item.get('image', {})
+        # Docling may emit ``"image": null`` (key present, value None) for image
+        # elements that carry no embedded bitmap. ``dict.get(key, {})`` only
+        # falls back to ``{}`` when the key is ABSENT, so coerce None explicitly
+        # to avoid ``AttributeError: 'NoneType' object has no attribute 'get'``.
+        image_data = item.get('image') or {}
         uri = image_data.get('uri', '')
         if uri.startswith('data:'):
             # Extract base64 data after the comma
