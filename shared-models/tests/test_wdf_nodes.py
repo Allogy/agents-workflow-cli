@@ -920,3 +920,37 @@ class TestMemoryFileUrlConfig:
                     'config': {'path': '/abs/path'},
                 }
             )
+
+
+# ============================================
+# API_CONSUMPTION Config
+# ============================================
+
+
+def test_api_consumption_is_a_node_config_type():
+    from workflow_models.enums import NodeConfigType
+
+    assert NodeConfigType.API_CONSUMPTION.value == 'API_CONSUMPTION'
+
+
+def test_api_consumption_config_validates_and_is_dispatched():
+    from workflow_models.wdf.nodes import NODE_TYPE_CONFIG_MAP, ApiConsumptionConfig
+
+    cfg = ApiConsumptionConfig(
+        connectorId='sales-api', primaryInput='{{q.output.text}}', maxRecursionDepth=1
+    )
+    assert cfg.connectorId == 'sales-api'
+    assert NODE_TYPE_CONFIG_MAP['api_consumption'] is ApiConsumptionConfig
+
+
+def test_api_consumption_config_requires_connector():
+    from workflow_models.wdf.nodes import ApiConsumptionConfig
+
+    with pytest.raises(ValidationError):
+        ApiConsumptionConfig(primaryInput='x')  # type: ignore[call-arg]
+
+
+def test_api_consumption_config_is_exported_from_wdf():
+    from workflow_models.wdf import ApiConsumptionConfig
+
+    assert ApiConsumptionConfig.__name__ == 'ApiConsumptionConfig'

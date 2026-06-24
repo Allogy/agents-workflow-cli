@@ -312,6 +312,27 @@ class HumanReviewConfig(BaseModel):
 
 
 # ============================================
+# INTEGRATION NODE CONFIGS
+# ============================================
+
+
+class ApiConsumptionConfig(BaseModel):
+    """Config for API_CONSUMPTION nodes.
+
+    Calls an external HTTP API via a configured org-scoped API Connector.
+    The connector (referenced by ``connectorId``) carries the OpenAPI schema,
+    variable definitions, host allowlist and secret bundle on the backend;
+    the WDF config only needs the connector reference plus routing/limits.
+    """
+
+    connectorId: str
+    primaryInput: str | None = None
+    maxRecursionDepth: int | None = 1
+    operationHint: str | None = None
+    timeoutSeconds: int | None = None
+
+
+# ============================================
 # NODE TYPE -> CONFIG MAPPING
 # ============================================
 
@@ -328,6 +349,7 @@ NODE_TYPE_CONFIG_MAP: dict[str, type[BaseModel]] = {
     'retrieve': RetrieveConfig,
     'document_extraction': DocumentExtractionConfig,
     'human_review': HumanReviewConfig,
+    'api_consumption': ApiConsumptionConfig,
 }
 
 # All valid WDF node type strings.

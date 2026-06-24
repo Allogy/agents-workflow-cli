@@ -41,6 +41,9 @@ class NodeConfigType(str, Enum):
     ITERATOR = 'ITERATOR'
     DOCUMENT_EXTRACTION = 'DOCUMENT_EXTRACTION'
 
+    # Integration nodes
+    API_CONSUMPTION = 'API_CONSUMPTION'
+
 
 class ExecutionMode(str, Enum):
     """Execution mode for nodes - determines input/output handling."""
