@@ -954,3 +954,54 @@ def test_api_consumption_config_is_exported_from_wdf():
     from workflow_models.wdf import ApiConsumptionConfig
 
     assert ApiConsumptionConfig.__name__ == 'ApiConsumptionConfig'
+
+
+def test_api_consumption_save_to_memory_defaults():
+    """saveToMemory defaults to False and memoryFilePath defaults to None."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig
+
+    cfg = ApiConsumptionConfig(connectorId='sales-api')
+    assert cfg.saveToMemory is False
+    assert cfg.memoryFilePath is None
+
+
+def test_api_consumption_save_to_memory_round_trips():
+    """saveToMemory + memoryFilePath parse and re-serialize without loss."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig
+
+    raw = {
+        'connectorId': 'zoom-api',
+        'primaryInput': '{{zoom_trigger.output.text}}',
+        'saveToMemory': True,
+        'memoryFilePath': 'transcripts/{{zoom_trigger.meeting_uuid}}.vtt',
+    }
+    cfg = ApiConsumptionConfig.model_validate(raw)
+    assert cfg.saveToMemory is True
+    assert cfg.memoryFilePath == 'transcripts/{{zoom_trigger.meeting_uuid}}.vtt'
+
+    # Re-serialize and confirm the two fields survive the round trip (Pydantic
+    # extra='ignore' would silently drop them if the schema omitted them).
+    dumped = cfg.model_dump()
+    assert dumped['saveToMemory'] is True
+    assert dumped['memoryFilePath'] == 'transcripts/{{zoom_trigger.meeting_uuid}}.vtt'
+
+
+def test_api_consumption_save_to_memory_via_node_definition():
+    """NodeDefinition dispatches save_to_memory fields to ApiConsumptionConfig."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig as _Cfg
+
+    node = NodeDefinition.model_validate(
+        {
+            'type': 'api_consumption',
+            'execution_mode': 'MESSAGES',
+            'label': 'Download Transcript',
+            'config': {
+                'connectorId': 'zoom-api',
+                'saveToMemory': True,
+                'memoryFilePath': 'transcripts/{{trigger.meeting_uuid}}.vtt',
+            },
+        }
+    )
+    assert isinstance(node.parsed_config, _Cfg)
+    assert node.parsed_config.saveToMemory is True
+    assert node.parsed_config.memoryFilePath == 'transcripts/{{trigger.meeting_uuid}}.vtt'

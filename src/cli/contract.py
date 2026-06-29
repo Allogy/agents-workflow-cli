@@ -109,6 +109,8 @@ _WDF_TO_SCHEMA_ALIASES: dict[str, dict[str, str]] = {
         'maxRecursionDepth': 'max_recursion_depth',
         'operationHint': 'operation_hint',
         'timeoutSeconds': 'timeout_seconds',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
 }
 

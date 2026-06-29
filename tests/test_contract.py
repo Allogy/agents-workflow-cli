@@ -518,6 +518,21 @@ def test_api_consumption_aliases_applied():
     }
 
 
+def test_api_consumption_save_to_memory_aliases_applied():
+    """API_CONSUMPTION: saveToMemory/memoryFilePath map to snake_case backend names."""
+    config = {
+        'connectorId': 'zoom-api',
+        'saveToMemory': True,
+        'memoryFilePath': 'transcripts/{{trigger.meeting_uuid}}.vtt',
+    }
+    result = _transform_config('API_CONSUMPTION', config)
+    assert result == {
+        'connector_id': 'zoom-api',
+        'save_to_memory': True,
+        'memory_file_path': 'transcripts/{{trigger.meeting_uuid}}.vtt',
+    }
+
+
 def test_api_consumption_valid_config_passes():
     config = {'connectorId': 'c1', 'primaryInput': '{{x.output.y}}'}
     errors = validate_node_contract(
