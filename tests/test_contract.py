@@ -480,3 +480,54 @@ class TestSchemaDefsMergeIntegration:
         # Should not raise (the $ref is resolved via merged defs)
         errors = validate_contract(workflow, registry)
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# API_CONSUMPTION node contract (camelCase WDF -> snake_case backend schema)
+# ---------------------------------------------------------------------------
+
+SAMPLE_API_CONSUMPTION_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'connector_id': {'type': 'string'},
+        'primaryInput': {'type': 'string'},
+        'max_recursion_depth': {'type': 'integer'},
+        'operation_hint': {'type': 'string'},
+        'timeout_seconds': {'type': 'integer'},
+    },
+    'required': ['connector_id'],
+}
+
+
+def test_api_consumption_aliases_applied():
+    """API_CONSUMPTION: camelCase WDF fields map to snake_case backend names."""
+    config = {
+        'connectorId': 'c1',
+        'maxRecursionDepth': 2,
+        'operationHint': 'op',
+        'timeoutSeconds': 5,
+        'primaryInput': '{{x.output.y}}',
+    }
+    result = _transform_config('API_CONSUMPTION', config)
+    assert result == {
+        'connector_id': 'c1',
+        'max_recursion_depth': 2,
+        'operation_hint': 'op',
+        'timeout_seconds': 5,
+        'primaryInput': '{{x.output.y}}',
+    }
+
+
+def test_api_consumption_valid_config_passes():
+    config = {'connectorId': 'c1', 'primaryInput': '{{x.output.y}}'}
+    errors = validate_node_contract(
+        'ask_api', 'API_CONSUMPTION', config, SAMPLE_API_CONSUMPTION_SCHEMA
+    )
+    assert errors == []
+
+
+def test_api_consumption_missing_connector_fails():
+    errors = validate_node_contract(
+        'ask_api', 'API_CONSUMPTION', {'primaryInput': 'x'}, SAMPLE_API_CONSUMPTION_SCHEMA
+    )
+    assert errors

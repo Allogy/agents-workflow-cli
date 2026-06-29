@@ -61,12 +61,12 @@ class TestInvoiceProcessingExample:
 
 
 class TestAllNodeTypesExample:
-    def test_has_9_nodes(self):
-        """The all-node-types example must exercise all 9 CLI-supported node types."""
+    def test_has_10_nodes(self):
+        """The all-node-types example must exercise all 10 CLI-supported node types."""
         path = EXAMPLES_DIR / 'all-node-types.workflow.yaml'
         data = yaml.safe_load(path.read_text())
         wf = WorkflowDefinition.model_validate(data)
-        assert len(wf.nodes) == 9
+        assert len(wf.nodes) == 10
         node_types = {n.type for n in wf.nodes.values()}
         # document_extraction is not included — it is not supported by the CLI
         expected_types = {
@@ -79,6 +79,7 @@ class TestAllNodeTypesExample:
             'structured_output',
             'retrieve',
             'human_review',
+            'api_consumption',
         }
         assert node_types == expected_types
 

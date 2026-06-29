@@ -1771,3 +1771,29 @@ edges:
         # Contract validation should still be called with stale registry
         mock_validate_contract.assert_called_once()
         mock_get_registry.assert_called_once()
+
+
+def test_api_consumption_build_node_parameters():
+    """api_consumption maps connectorId, slug-rewritten primaryInput, and limits."""
+    input_uuid = UUID('11111111-1111-1111-1111-111111111111')
+    slug_to_uuid = {'user-q': input_uuid}
+    node_config = {
+        'connectorId': '44444444-4444-4444-4444-444444444444',
+        'primaryInput': '{{user-q.output.text}}',
+        'maxRecursionDepth': 2,
+        'operationHint': 'getSales',
+        'timeoutSeconds': 30,
+    }
+    node_def = NodeDefinition.model_construct(
+        type='api_consumption',
+        execution_mode='MESSAGES',
+        label='Query API',
+        config=node_config,
+    )
+    params = build_node_parameters(node_def, 'ask-api', node_config, slug_to_uuid)
+    assert params['type'] == 'apiConsumption'
+    assert params['connectorId'] == '44444444-4444-4444-4444-444444444444'
+    assert str(input_uuid) in params['primaryInput']
+    assert params['maxRecursionDepth'] == 2
+    assert params['operationHint'] == 'getSales'
+    assert params['timeoutSeconds'] == 30

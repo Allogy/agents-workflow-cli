@@ -6,7 +6,7 @@ shared between the backend API and the workflow CLI. It has zero SQLAlchemy or
 SQLModel dependencies.
 """
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'
 
 from workflow_models.enums import (
     EdgeType,

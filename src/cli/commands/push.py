@@ -73,6 +73,7 @@ _WDF_TYPE_TO_PARAMS_TYPE: dict[str, str] = {
     'document_extraction': 'documentExtraction',
     'human_review': 'humanReview',
     'memory_file_url': 'memoryFileUrl',
+    'api_consumption': 'apiConsumption',
 }
 
 
@@ -447,6 +448,18 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
+
+    elif node_type == 'api_consumption':
+        # connectorId references an org-scoped API Connector (resolved upstream).
+        if 'connectorId' in node_config:
+            params['connectorId'] = node_config['connectorId']
+        if 'primaryInput' in node_config:
+            params['primaryInput'] = _replace_slugs_with_uuids(
+                node_config['primaryInput'], slug_to_uuid
+            )
+        for key in ('maxRecursionDepth', 'operationHint', 'timeoutSeconds'):
+            if key in node_config:
+                params[key] = node_config[key]
 
     elif node_type == 'structured_input':
         # schema stays in config, not parameters

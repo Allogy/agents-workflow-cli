@@ -104,6 +104,12 @@ _WDF_TO_SCHEMA_ALIASES: dict[str, dict[str, str]] = {
         'allowReject': 'allow_reject',
         'allowEdit': 'allow_edit',
     },
+    'API_CONSUMPTION': {
+        'connectorId': 'connector_id',
+        'maxRecursionDepth': 'max_recursion_depth',
+        'operationHint': 'operation_hint',
+        'timeoutSeconds': 'timeout_seconds',
+    },
 }
 
 

@@ -452,3 +452,44 @@ exit: agent
         # timeout_seconds and system_prompt should not appear when unset
         assert 'timeout_seconds' not in output_yaml
         assert 'system_prompt' not in output_yaml
+
+
+def test_api_consumption_round_trip():
+    """An api_consumption node round-trips through YAML without config loss."""
+    yaml_str = """\
+name: API Consumption Flow
+nodes:
+  user_q:
+    type: plain_txt_input
+    execution_mode: INPUT
+    label: Ask
+    config:
+      placeholder: "Ask about sales"
+  ask_api:
+    type: api_consumption
+    execution_mode: MESSAGES
+    label: Query Sales API
+    config:
+      connectorId: "44444444-4444-4444-4444-444444444444"
+      primaryInput: "{{user_q.output.text}}"
+      maxRecursionDepth: 1
+      operationHint: getSales
+      timeoutSeconds: 30
+edges:
+  - from: user_q
+    to: ask_api
+entry: user_q
+exit: ask_api
+"""
+    wf = load_workflow_yaml(yaml_str)
+    assert wf.nodes['ask_api'].type == 'api_consumption'
+    assert wf.nodes['ask_api'].config['connectorId'] == '44444444-4444-4444-4444-444444444444'
+
+    dumped = dump_workflow_yaml(wf)
+    reloaded = load_workflow_yaml(dumped)
+    rt = reloaded.nodes['ask_api'].config
+    assert rt['connectorId'] == '44444444-4444-4444-4444-444444444444'
+    assert rt['primaryInput'] == '{{user_q.output.text}}'
+    assert rt['maxRecursionDepth'] == 1
+    assert rt['operationHint'] == 'getSales'
+    assert rt['timeoutSeconds'] == 30
