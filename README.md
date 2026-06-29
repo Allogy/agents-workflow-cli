@@ -24,22 +24,44 @@ uv run python -m cli --help
 
 The CLI and shared models are published to a private AWS CodeArtifact registry.
 
-**First-time setup** (creates the domain and repository):
+All `make` targets below run **from the parent repo root** (`agents_platform_services/`),
+not from this submodule directory, and require working AWS credentials for account
+`522946686627` (e.g. `aws sso login`).
+
+**One-shot install (recommended)** — fetches the token, builds the authenticated
+index URL, and installs the `workflow` tool in a single step, so there is no token
+to copy by hand:
 
 ```bash
 # From the repo root
-make codeartifact-setup
+make codeartifact-install-cli
 ```
 
-**Install the CLI**:
+Re-run it any time to upgrade or refresh the (short-lived, ~12h) auth token. After
+installing, ensure `~/.local/bin` is on your `PATH` (`uv tool update-shell` adds it),
+then run `workflow --help`.
+
+**Manual install** — if you need the raw URL (e.g. for `pip` or `requirements.txt`):
 
 ```bash
-# Get credentials (prints token + endpoint)
-make codeartifact-login
+# From the repo root: one-time domain/repo creation (idempotent)
+make codeartifact-setup
 
-# Then install
-uv tool install agents-workflow-cli \
-  --index-url "https://aws:<TOKEN>@<ENDPOINT>/simple/"
+# Install using the auto-assembled, authenticated index URL
+uv tool install agents-workflow-cli --index-url "$(make -s codeartifact-index-url)"
+```
+
+> Credentials are HTTP basic-auth embedded in the URL:
+> `https://aws:<TOKEN>@<host>/.../simple/` — the token is the *password* and must be
+> followed by `@<host>`, **not** `aws:<TOKEN>:https://...`. `make codeartifact-login`
+> prints the token and endpoint separately for reference; `make codeartifact-index-url`
+> assembles them into the correct URL for you.
+
+**Use straight from this submodule (no CodeArtifact)** — if you already have the
+submodule checked out and just want to run it locally:
+
+```bash
+cd workflow-cli && uv sync --all-groups && uv run workflow --help
 ```
 
 **Publish a new version**:
