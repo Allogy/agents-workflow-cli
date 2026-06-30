@@ -1,6 +1,6 @@
 # Node Types Reference
 
-There are 9 active node types available for building workflows. Each has a specific purpose, execution mode, and config schema.
+There are 10 active node types available for building workflows. Each has a specific purpose, execution mode, and config schema.
 
 ## Input Nodes
 
@@ -271,3 +271,71 @@ Config fields:
 | `allowApprove` | boolean | No | Enable approve action (default true). |
 | `allowReject` | boolean | No | Enable reject action (default true). |
 | `allowEdit` | boolean | No | Enable inline editing before approval (default false). |
+
+## Integration Nodes
+
+### api_consumption
+
+Calls an external HTTP API through a configured org-scoped API Connector. The connector (referenced by `connectorId`) carries the OpenAPI schema, variable definitions, host allowlist, and secrets on the backend.
+
+- **Execution mode:** MESSAGES
+- **When to use:** The workflow needs live data from a third-party API, or needs to download a large response body (a transcript, export, or media file) into the run's memory for downstream nodes.
+
+```yaml
+fetch_transcript:
+  type: api_consumption
+  execution_mode: MESSAGES
+  label: Download Zoom Transcript
+  config:
+    connectorId: zoom-api
+    primaryInput: "{{zoom_trigger.output.text}}"
+    operationHint: getMeetingTranscript
+    timeoutSeconds: 60
+    saveToMemory: true
+    memoryFilePath: "transcripts/{{zoom_trigger.output.meeting_uuid}}.vtt"
+```
+
+Config fields:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `connectorId` | string | Yes | UUID of the org-scoped API Connector to invoke. |
+| `primaryInput` | string | No | Variable reference for the input routed to the connector. |
+| `maxRecursionDepth` | integer | No | Max follow-up API calls the node may chain (default 1). |
+| `operationHint` | string | No | Name of the connector operation to prefer. |
+| `timeoutSeconds` | integer | No | Per-request timeout in seconds. |
+| `saveToMemory` | boolean | No | When `true`, stream the HTTP response body to a file in the run's memory scope instead of parsing it inline. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated, path-confined relative path under the run memory scope (e.g. `transcripts/{{trigger.output.meeting_uuid}}.vtt`). Only used when `saveToMemory` is `true`. Defaults to `api/{node_id}/response.<ext>` when omitted. Must be relative — absolute paths and `..` segments are rejected. |
+| `responseVariableMappings` | list of objects | No | Extract JSON paths from the response body and expose them as named output variables. Each entry is `{ variable: <name>, jsonPath: <glom path> }`. `jsonPath` is a [glom](https://glom.readthedocs.io/) path into the parsed JSON response (e.g. `types[0].type.name`, `data.results[0].id`, `name`); `variable` is the output name, referenced downstream as `{{node.output.<variable>}}`. Defaults to an empty list. |
+
+When `saveToMemory` is `true`, the node exposes the response as a memory file rather than inline text. Feed the resulting file into a downstream `memory_file_url` node to produce a signed download URL:
+
+```yaml
+transcript_url:
+  type: memory_file_url
+  execution_mode: OUTPUT
+  label: Transcript Download Link
+  config:
+    path: "{{fetch_transcript.output.memory_file_path}}"
+```
+
+See `03-variable-references.md` for the `output.memory_file_path`, `output.memory_file_url`, `output.content_type`, `output.size_bytes`, and `output.status_code` paths exposed by this node.
+
+Use `responseVariableMappings` to pull specific values out of a JSON response and expose them as named output variables, instead of parsing the whole body downstream:
+
+```yaml
+fetch_pokemon:
+  type: api_consumption
+  execution_mode: MESSAGES
+  label: Fetch Pokemon
+  config:
+    connectorId: pokeapi
+    primaryInput: "{{user_q.output.text}}"
+    operationHint: getPokemon
+    responseVariableMappings:
+      - variable: primary_type
+        jsonPath: "types[0].type.name"
+      - variable: base_experience
+        jsonPath: "base_experience"
+```
+
+Each mapped `variable` is then available downstream as `{{fetch_pokemon.output.primary_type}}` and `{{fetch_pokemon.output.base_experience}}`. The `jsonPath` uses [glom](https://glom.readthedocs.io/) syntax: dotted keys (`data.results`) and bracketed list indices (`types[0]`).

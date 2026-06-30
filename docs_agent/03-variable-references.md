@@ -104,7 +104,54 @@ Example: `{{extract.output.structured}}`
 
 Example: `{{review.output.feedback}}`
 
+### api_consumption
+
+When `saveToMemory` is `false` (default), the parsed response body is available inline. When `saveToMemory` is `true`, the response body is written to the run memory scope and the node exposes file metadata instead.
+
+| Path | Type | Description |
+|------|------|-------------|
+| `output.memory_file_path` | string | Relative path of the saved response under the run memory scope (only when `saveToMemory` is true). |
+| `output.memory_file_url` | string | Signed download URL for the saved response file. |
+| `output.content_type` | string | MIME type of the HTTP response. |
+| `output.size_bytes` | number | Size of the response body in bytes. |
+| `output.status_code` | integer | HTTP status code returned by the API. |
+
+Example: `{{fetch_transcript.output.memory_file_path}}` feeds a downstream `memory_file_url` node; `{{fetch_transcript.output.memory_file_url}}` gives a ready-to-use signed URL.
+
+In addition to these static paths, any entry in the node's `responseVariableMappings` config (see `02-node-types-reference.md`) appears as a **dynamic** `output.<variable>` reference downstream. Each mapping binds a glom `jsonPath` from the parsed JSON response to the output `variable` name you choose:
+
+```yaml
+fetch_pokemon:
+  type: api_consumption
+  execution_mode: MESSAGES
+  config:
+    connectorId: pokeapi
+    responseVariableMappings:
+      - variable: primary_type
+        jsonPath: "types[0].type.name"
+```
+
+Reference the mapped value downstream as `{{fetch_pokemon.output.primary_type}}`. These dynamic references are author-defined, so they are not in a fixed table — the available names are exactly the `variable` values you declare in `responseVariableMappings`.
+
 ## Common Patterns
+
+### API response saved to memory, then linked
+
+```yaml
+fetch_transcript:
+  type: api_consumption
+  execution_mode: MESSAGES
+  config:
+    connectorId: zoom-api
+    saveToMemory: true
+    memoryFilePath: "transcripts/{{trigger.output.meeting_uuid}}.vtt"
+
+transcript_url:
+  type: memory_file_url
+  execution_mode: OUTPUT
+  config:
+    path: "{{fetch_transcript.output.memory_file_path}}"
+```
 
 ### Chaining LLM calls
 

@@ -457,7 +457,14 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
-        for key in ('maxRecursionDepth', 'operationHint', 'timeoutSeconds'):
+        for key in (
+            'maxRecursionDepth',
+            'operationHint',
+            'timeoutSeconds',
+            'saveToMemory',
+            'memoryFilePath',
+            'responseVariableMappings',
+        ):
             if key in node_config:
                 params[key] = node_config[key]
 

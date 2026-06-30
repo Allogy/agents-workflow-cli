@@ -475,6 +475,13 @@ nodes:
       maxRecursionDepth: 1
       operationHint: getSales
       timeoutSeconds: 30
+      saveToMemory: true
+      memoryFilePath: "transcripts/{{user_q.output.meeting_uuid}}.vtt"
+      responseVariableMappings:
+        - variable: primary_type
+          jsonPath: "types[0].type.name"
+        - variable: first_id
+          jsonPath: "data.results[0].id"
 edges:
   - from: user_q
     to: ask_api
@@ -493,3 +500,13 @@ exit: ask_api
     assert rt['maxRecursionDepth'] == 1
     assert rt['operationHint'] == 'getSales'
     assert rt['timeoutSeconds'] == 30
+    # save-to-memory fields must survive the round trip (would be silently
+    # dropped by Pydantic extra='ignore' if the schema omitted them).
+    assert rt['saveToMemory'] is True
+    assert rt['memoryFilePath'] == 'transcripts/{{user_q.output.meeting_uuid}}.vtt'
+    # responseVariableMappings must survive the round trip (would be silently
+    # dropped by Pydantic extra='ignore' if the schema omitted the field).
+    assert rt['responseVariableMappings'] == [
+        {'variable': 'primary_type', 'jsonPath': 'types[0].type.name'},
+        {'variable': 'first_id', 'jsonPath': 'data.results[0].id'},
+    ]

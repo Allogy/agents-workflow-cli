@@ -316,6 +316,19 @@ class HumanReviewConfig(BaseModel):
 # ============================================
 
 
+class ApiResponseFieldMapping(BaseModel):
+    """A single response-body field to expose as a named output variable.
+
+    ``jsonPath`` is a glom path into the parsed JSON response
+    (e.g. ``types[0].type.name``, ``data.results[0].id``, ``name``) and
+    ``variable`` is the output name it is bound to, referenced downstream as
+    ``{{node.output.<variable>}}``.
+    """
+
+    variable: str
+    jsonPath: str
+
+
 class ApiConsumptionConfig(BaseModel):
     """Config for API_CONSUMPTION nodes.
 
@@ -323,6 +336,12 @@ class ApiConsumptionConfig(BaseModel):
     The connector (referenced by ``connectorId``) carries the OpenAPI schema,
     variable definitions, host allowlist and secret bundle on the backend;
     the WDF config only needs the connector reference plus routing/limits.
+
+    When ``saveToMemory`` is true, the HTTP response body is streamed to a
+    file in the workflow run's memory scope instead of being parsed inline,
+    exposing downstream output variables ``output.memory_file_path``,
+    ``output.memory_file_url``, ``output.content_type``, ``output.size_bytes``
+    and ``output.status_code``.
     """
 
     connectorId: str
@@ -330,6 +349,19 @@ class ApiConsumptionConfig(BaseModel):
     maxRecursionDepth: int | None = 1
     operationHint: str | None = None
     timeoutSeconds: int | None = None
+    # When true, stream the HTTP response body to a file in the run memory
+    # scope rather than parsing it inline. Mirrors FileUploadConfig.saveToMemory.
+    saveToMemory: bool = False
+    # Templated, path-confined relative path under the run memory scope
+    # (e.g. ``transcripts/{{zoom_trigger.meeting_uuid}}.vtt``). Only used when
+    # saveToMemory is true. Defaults to ``api/{node_id}/response.<ext>`` on the
+    # backend when omitted.
+    memoryFilePath: str | None = None
+    # Extract JSON paths from the response body and expose them as named
+    # workflow output variables. Each entry binds a glom ``jsonPath`` into the
+    # parsed JSON response to an output ``variable`` referenced downstream as
+    # ``{{node.output.<variable>}}``.
+    responseVariableMappings: list[ApiResponseFieldMapping] = Field(default_factory=list)
 
 
 # ============================================
