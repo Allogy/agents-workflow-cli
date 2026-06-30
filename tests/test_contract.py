@@ -533,6 +533,27 @@ def test_api_consumption_save_to_memory_aliases_applied():
     }
 
 
+def test_api_consumption_response_variable_mappings_aliases_applied():
+    """API_CONSUMPTION: responseVariableMappings maps to the snake_case backend name.
+
+    Nested item keys (variable, jsonPath) pass through unchanged because
+    _transform_config only rewrites top-level keys.
+    """
+    config = {
+        'connectorId': 'pokeapi',
+        'responseVariableMappings': [
+            {'variable': 'primary_type', 'jsonPath': 'types[0].type.name'},
+        ],
+    }
+    result = _transform_config('API_CONSUMPTION', config)
+    assert result == {
+        'connector_id': 'pokeapi',
+        'response_variable_mappings': [
+            {'variable': 'primary_type', 'jsonPath': 'types[0].type.name'},
+        ],
+    }
+
+
 def test_api_consumption_valid_config_passes():
     config = {'connectorId': 'c1', 'primaryInput': '{{x.output.y}}'}
     errors = validate_node_contract(

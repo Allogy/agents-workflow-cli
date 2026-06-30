@@ -111,6 +111,11 @@ _WDF_TO_SCHEMA_ALIASES: dict[str, dict[str, str]] = {
         'timeoutSeconds': 'timeout_seconds',
         'saveToMemory': 'save_to_memory',
         'memoryFilePath': 'memory_file_path',
+        # Only the top-level list key is aliased here. _transform_config walks
+        # top-level keys only, so the nested item keys (variable, jsonPath) are
+        # passed through unchanged inside each list element; the backend schema
+        # for ApiResponseFieldMapping accepts them as-is.
+        'responseVariableMappings': 'response_variable_mappings',
     },
 }
 

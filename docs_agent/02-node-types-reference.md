@@ -305,6 +305,7 @@ Config fields:
 | `timeoutSeconds` | integer | No | Per-request timeout in seconds. |
 | `saveToMemory` | boolean | No | When `true`, stream the HTTP response body to a file in the run's memory scope instead of parsing it inline. Defaults to `false`. |
 | `memoryFilePath` | string | No | Templated, path-confined relative path under the run memory scope (e.g. `transcripts/{{trigger.output.meeting_uuid}}.vtt`). Only used when `saveToMemory` is `true`. Defaults to `api/{node_id}/response.<ext>` when omitted. Must be relative — absolute paths and `..` segments are rejected. |
+| `responseVariableMappings` | list of objects | No | Extract JSON paths from the response body and expose them as named output variables. Each entry is `{ variable: <name>, jsonPath: <glom path> }`. `jsonPath` is a [glom](https://glom.readthedocs.io/) path into the parsed JSON response (e.g. `types[0].type.name`, `data.results[0].id`, `name`); `variable` is the output name, referenced downstream as `{{node.output.<variable>}}`. Defaults to an empty list. |
 
 When `saveToMemory` is `true`, the node exposes the response as a memory file rather than inline text. Feed the resulting file into a downstream `memory_file_url` node to produce a signed download URL:
 
@@ -318,3 +319,23 @@ transcript_url:
 ```
 
 See `03-variable-references.md` for the `output.memory_file_path`, `output.memory_file_url`, `output.content_type`, `output.size_bytes`, and `output.status_code` paths exposed by this node.
+
+Use `responseVariableMappings` to pull specific values out of a JSON response and expose them as named output variables, instead of parsing the whole body downstream:
+
+```yaml
+fetch_pokemon:
+  type: api_consumption
+  execution_mode: MESSAGES
+  label: Fetch Pokemon
+  config:
+    connectorId: pokeapi
+    primaryInput: "{{user_q.output.text}}"
+    operationHint: getPokemon
+    responseVariableMappings:
+      - variable: primary_type
+        jsonPath: "types[0].type.name"
+      - variable: base_experience
+        jsonPath: "base_experience"
+```
+
+Each mapped `variable` is then available downstream as `{{fetch_pokemon.output.primary_type}}` and `{{fetch_pokemon.output.base_experience}}`. The `jsonPath` uses [glom](https://glom.readthedocs.io/) syntax: dotted keys (`data.results`) and bracketed list indices (`types[0]`).

@@ -463,6 +463,7 @@ def build_node_parameters(
             'timeoutSeconds',
             'saveToMemory',
             'memoryFilePath',
+            'responseVariableMappings',
         ):
             if key in node_config:
                 params[key] = node_config[key]

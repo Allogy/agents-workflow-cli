@@ -19,6 +19,7 @@ from workflow_models.wdf.nodes import (
     VALID_NODE_TYPES,
     AgentConfig,
     ApiConsumptionConfig,
+    ApiResponseFieldMapping,
     DocumentExtractionConfig,
     ExtractionField,
     FileUploadConfig,
@@ -60,6 +61,7 @@ __all__ = [
     'MemoryFileUrlConfig',
     'ApiConsumptionConfig',
     # Supporting types
+    'ApiResponseFieldMapping',
     'ExtractionField',
     'VALID_NODE_TYPES',
     'VALID_EXECUTION_MODES',

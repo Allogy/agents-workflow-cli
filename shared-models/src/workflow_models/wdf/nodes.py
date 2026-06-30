@@ -316,6 +316,19 @@ class HumanReviewConfig(BaseModel):
 # ============================================
 
 
+class ApiResponseFieldMapping(BaseModel):
+    """A single response-body field to expose as a named output variable.
+
+    ``jsonPath`` is a glom path into the parsed JSON response
+    (e.g. ``types[0].type.name``, ``data.results[0].id``, ``name``) and
+    ``variable`` is the output name it is bound to, referenced downstream as
+    ``{{node.output.<variable>}}``.
+    """
+
+    variable: str
+    jsonPath: str
+
+
 class ApiConsumptionConfig(BaseModel):
     """Config for API_CONSUMPTION nodes.
 
@@ -344,6 +357,11 @@ class ApiConsumptionConfig(BaseModel):
     # saveToMemory is true. Defaults to ``api/{node_id}/response.<ext>`` on the
     # backend when omitted.
     memoryFilePath: str | None = None
+    # Extract JSON paths from the response body and expose them as named
+    # workflow output variables. Each entry binds a glom ``jsonPath`` into the
+    # parsed JSON response to an output ``variable`` referenced downstream as
+    # ``{{node.output.<variable>}}``.
+    responseVariableMappings: list[ApiResponseFieldMapping] = Field(default_factory=list)
 
 
 # ============================================
