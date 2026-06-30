@@ -1503,6 +1503,18 @@ class TestExtractNodeConfig:
         result = extract_node_config('PLAIN_TXT_INPUT', {}, {})
         assert result == {}
 
+    def test_additive_save_to_memory_from_parameters(self):
+        """saveToMemory/memoryFilePath extract for every execution node type that
+        supports the additive (non-API_CONSUMPTION) run-memory save hook."""
+        for node_type in ('AGENT', 'RAG_AGENT', 'LLM_CALL', 'RETRIEVE', 'STRUCTURED_OUTPUT'):
+            parameters = {
+                'saveToMemory': True,
+                'memoryFilePath': 'analysis/{{node_id}}.json',
+            }
+            result = extract_node_config(node_type, parameters, {})
+            assert result['saveToMemory'] is True
+            assert result['memoryFilePath'] == 'analysis/{{node_id}}.json'
+
 
 # ============================================================================
 # Replace UUID References Tests

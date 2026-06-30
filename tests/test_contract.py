@@ -533,6 +533,18 @@ def test_api_consumption_save_to_memory_aliases_applied():
     }
 
 
+def test_additive_save_to_memory_aliases_applied():
+    """Execution node types (other than API_CONSUMPTION) alias saveToMemory/
+    memoryFilePath to the same snake_case backend names."""
+    config = {'saveToMemory': True, 'memoryFilePath': 'analysis/{{node_id}}.json'}
+    expected = {
+        'save_to_memory': True,
+        'memory_file_path': 'analysis/{{node_id}}.json',
+    }
+    for node_type in ('AGENT', 'RAG_AGENT', 'LLM_CALL', 'RETRIEVE', 'STRUCTURED_OUTPUT'):
+        assert _transform_config(node_type, config) == expected
+
+
 def test_api_consumption_response_variable_mappings_aliases_applied():
     """API_CONSUMPTION: responseVariableMappings maps to the snake_case backend name.
 

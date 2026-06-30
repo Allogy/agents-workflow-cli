@@ -76,27 +76,37 @@ _WDF_TO_SCHEMA_ALIASES: dict[str, dict[str, str]] = {
     'AGENT': {
         'model': 'model_name',
         'maxTokens': 'max_tokens',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
     'RAG_AGENT': {
         'model': 'model_name',
         'maxTokens': 'max_tokens',
         'topK': 'top_k_results',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
     'LLM_CALL': {
         'model': 'model_name',
         'maxTokens': 'max_tokens',
         'template': 'system_prompt',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
     'RETRIEVE': {
         'topK': 'top_k_results',
         'scoreThreshold': 'similarity_threshold',
         'enableReranking': 'enable_reranking',
         'includeMetadata': 'include_metadata',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
     'STRUCTURED_OUTPUT': {
         'model': 'model_name',
         'maxTokens': 'max_tokens',
         'schema': 'output_schema',
+        'saveToMemory': 'save_to_memory',
+        'memoryFilePath': 'memory_file_path',
     },
     'HUMAN_REVIEW': {
         'timeoutMinutes': 'timeout_minutes',
