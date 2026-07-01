@@ -114,6 +114,8 @@ Config fields:
 | `system_prompt` | string | No | System-level instructions for the LLM. |
 | `temperature` | float | No | 0.0 (deterministic) to 2.0 (creative). Default 0.7. Use 0.0-0.3 for extraction/classification, 0.3-0.5 for reports, 0.5-0.7 for creative content. |
 | `maxTokens` | integer | No | Maximum tokens in the response. 1024 for short outputs, 2048-4096 for reports, 8192 for long-form. |
+| `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — unlike `api_consumption`'s `saveToMemory`, the normal output is unaffected. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy (e.g. `analysis/{{node_id}}.json`). Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
 ### agent
 
@@ -141,6 +143,8 @@ Config fields:
 | `temperature` | float | No | Override the agent's default temperature. |
 | `maxTokens` | integer | No | Override the agent's default max tokens. |
 | `system_prompt` | string | No | Override the agent's default system prompt. |
+| `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
 *Either `agent_name` or `agentId` (UUID) is required.
 
@@ -172,6 +176,8 @@ Config fields:
 | `primaryInput` | string | No | Variable reference for input routing. |
 | `topK` | integer | No | Number of documents to retrieve per KB. |
 | `system_prompt` | string | No | Override the agent's system prompt. |
+| `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
 ### retrieve
 
@@ -200,6 +206,8 @@ Config fields:
 | `scoreThreshold` | float | No | Minimum relevance score (0.0-1.0). |
 | `enableReranking` | boolean | No | Enable result reranking (default false). |
 | `includeMetadata` | boolean | No | Include document metadata (default true). |
+| `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
 ### structured_output
 
@@ -238,6 +246,8 @@ Config fields:
 | `model` | string | No | LLM model identifier. |
 | `primaryInput` | string | No | Variable reference for input data. |
 | `system_prompt` | string | No | Instructions for the extraction. |
+| `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
+| `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
 ## Human Interaction Nodes
 

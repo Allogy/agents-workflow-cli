@@ -362,6 +362,9 @@ def build_node_parameters(
             params['use_rlm'] = node_config['use_rlm']
         if 'web_tools_enabled' in node_config:
             params['web_tools_enabled'] = node_config['web_tools_enabled']
+        for key in ('saveToMemory', 'memoryFilePath'):
+            if key in node_config:
+                params[key] = node_config[key]
 
     elif node_type == 'rag_agent':
         if 'agent_id' in node_config:
@@ -382,6 +385,9 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
+        for key in ('saveToMemory', 'memoryFilePath'):
+            if key in node_config:
+                params[key] = node_config[key]
     elif node_type == 'llm_call':
         for key in ('model', 'temperature', 'maxTokens'):
             if key in node_config:
@@ -391,6 +397,9 @@ def build_node_parameters(
         if 'template' in node_config:
             # Replace slug references with UUID references
             params['template'] = _replace_slugs_with_uuids(node_config['template'], slug_to_uuid)
+        for key in ('saveToMemory', 'memoryFilePath'):
+            if key in node_config:
+                params[key] = node_config[key]
         params['variables'] = []
 
     elif node_type == 'retrieve':
@@ -410,6 +419,9 @@ def build_node_parameters(
             params['searchQuery'] = _replace_slugs_with_uuids(
                 node_config['searchQuery'], slug_to_uuid
             )
+        for key in ('saveToMemory', 'memoryFilePath'):
+            if key in node_config:
+                params[key] = node_config[key]
 
     elif node_type == 'human_review':
         # Map WDF field names to the parameter keys the Temporal runtime expects.
@@ -448,6 +460,9 @@ def build_node_parameters(
             params['primaryInput'] = _replace_slugs_with_uuids(
                 node_config['primaryInput'], slug_to_uuid
             )
+        for key in ('saveToMemory', 'memoryFilePath'):
+            if key in node_config:
+                params[key] = node_config[key]
 
     elif node_type == 'api_consumption':
         # connectorId references an org-scoped API Connector (resolved upstream).

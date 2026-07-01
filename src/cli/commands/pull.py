@@ -172,6 +172,8 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'systemPrompt': 'system_prompt',
         'use_rlm': None,
         'web_tools_enabled': None,
+        'saveToMemory': None,
+        'memoryFilePath': None,
     },
     'RAG_AGENT': {
         'agentId': None,
@@ -179,6 +181,8 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'primaryInput': None,
         'topK': None,
         'systemPrompt': 'system_prompt',
+        'saveToMemory': None,
+        'memoryFilePath': None,
     },
     'LLM_CALL': {
         'model': None,
@@ -187,12 +191,16 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'systemPrompt': 'system_prompt',
         'temperature': None,
         'maxTokens': None,
+        'saveToMemory': None,
+        'memoryFilePath': None,
     },
     'RETRIEVE': {
         'knowledgeBaseId': None,
         'topK': None,
         'searchQuery': None,
         'scoreThreshold': None,
+        'saveToMemory': None,
+        'memoryFilePath': None,
     },
     'STRUCTURED_INPUT': {
         # schema lives in config, not parameters
@@ -201,6 +209,8 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         # schema lives in config, not parameters
         'primaryInput': None,
         'systemPrompt': 'system_prompt',
+        'saveToMemory': None,
+        'memoryFilePath': None,
     },
     'HUMAN_REVIEW': {
         'instructions': 'review_prompt',

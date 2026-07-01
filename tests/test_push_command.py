@@ -1797,3 +1797,32 @@ def test_api_consumption_build_node_parameters():
     assert params['maxRecursionDepth'] == 2
     assert params['operationHint'] == 'getSales'
     assert params['timeoutSeconds'] == 30
+
+
+@pytest.mark.parametrize(
+    'wdf_type,base_config',
+    [
+        ('agent', {'agent_id': 'agent-1', 'model': 'sonnet'}),
+        ('rag_agent', {'agent_id': 'agent-1', 'model': 'sonnet'}),
+        ('llm_call', {'model': 'sonnet'}),
+        ('retrieve', {'knowledge_base_id': 'kb-1'}),
+        ('structured_output', {'schema': {'fields': []}}),
+    ],
+)
+def test_additive_save_to_memory_passes_through(wdf_type, base_config):
+    """saveToMemory/memoryFilePath survive into runtime parameters for every
+    execution node type that supports the additive (non-API_CONSUMPTION) hook."""
+    node_config = {
+        **base_config,
+        'saveToMemory': True,
+        'memoryFilePath': 'analysis/{{node_id}}.json',
+    }
+    node_def = NodeDefinition.model_construct(
+        type=wdf_type,
+        execution_mode='MESSAGES',
+        label='Node',
+        config=node_config,
+    )
+    params = build_node_parameters(node_def, 'node-slug', node_config, {})
+    assert params['saveToMemory'] is True
+    assert params['memoryFilePath'] == 'analysis/{{node_id}}.json'
