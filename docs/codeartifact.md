@@ -13,8 +13,14 @@ Both are hosted on a private AWS CodeArtifact registry:
 ```
 Domain:     agents-platform
 Repository: agents-python-packages
-Endpoint:   https://agents-platform-522946686627.d.codeartifact.us-east-1.amazonaws.com/pypi/agents-python-packages/
+Endpoint:   https://agents-platform-<AWS_ACCOUNT_ID>.d.codeartifact.us-east-1.amazonaws.com/pypi/agents-python-packages/
 ```
+
+> **Note:** `<AWS_ACCOUNT_ID>` is the internal platform AWS account ID and is not
+> published in this repository. Internal developers can retrieve it after
+> `aws sso login` with `aws sts get-caller-identity --query Account --output text`,
+> or find it in the internal platform onboarding docs. Export it as
+> `CODEARTIFACT_OWNER` before running the `aws` commands below.
 
 ## Defaults
 
@@ -24,7 +30,7 @@ All CodeArtifact configuration lives in the **root `Makefile`** with sensible de
 |-------------------------|----------------------------|
 | `CODEARTIFACT_DOMAIN`   | `agents-platform`          |
 | `CODEARTIFACT_REPO`     | `agents-python-packages`   |
-| `CODEARTIFACT_OWNER`    | `522946686627`             |
+| `CODEARTIFACT_OWNER`    | `<AWS_ACCOUNT_ID>`         |
 | `CODEARTIFACT_REGION`   | `us-east-1`               |
 | `CODEARTIFACT_UPSTREAM` | `public:pypi`              |
 
@@ -69,13 +75,13 @@ This prints the token and endpoint URL which you can export for `uv` or `pip`.
 # Grab credentials
 export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
   --domain agents-platform \
-  --domain-owner 522946686627 \
+  --domain-owner "$CODEARTIFACT_OWNER" \
   --region us-east-1 \
   --query authorizationToken --output text)
 
 export CODEARTIFACT_ENDPOINT=$(aws codeartifact get-repository-endpoint \
   --domain agents-platform \
-  --domain-owner 522946686627 \
+  --domain-owner "$CODEARTIFACT_OWNER" \
   --repository agents-python-packages \
   --format pypi \
   --region us-east-1 \
@@ -196,7 +202,7 @@ uv sync --all-groups   # Uses ../workflow-cli/shared-models (editable)
 ```bash
 # Set the CodeArtifact token (or add to .env)
 export CODEARTIFACT_TOKEN=$(aws codeartifact get-authorization-token \
-  --domain agents-platform --domain-owner 522946686627 \
+  --domain agents-platform --domain-owner "$CODEARTIFACT_OWNER" \
   --region us-east-1 --query authorizationToken --output text)
 
 docker compose build agents-api

@@ -25,8 +25,9 @@ uv run python -m cli --help
 The CLI and shared models are published to a private AWS CodeArtifact registry.
 
 All `make` targets below run **from the parent repo root** (`agents_platform_services/`),
-not from this submodule directory, and require working AWS credentials for account
-`522946686627` (e.g. `aws sso login`).
+not from this submodule directory, and require working AWS credentials for the
+platform's AWS account (e.g. `aws sso login`). The account ID is internal — see
+[`docs/codeartifact.md`](docs/codeartifact.md) for how to retrieve it.
 
 **One-shot install (recommended)** — fetches the token, builds the authenticated
 index URL, and installs the `workflow` tool in a single step, so there is no token
