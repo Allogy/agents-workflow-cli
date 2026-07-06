@@ -20,13 +20,73 @@ uv run workflow --help
 uv run python -m cli --help
 ```
 
+## Install from GitHub (Public)
+
+The public mirror at [`Allogy/agents-workflow-cli`](https://github.com/Allogy/agents-workflow-cli)
+is the easiest way to get the CLI — no AWS credentials or CodeArtifact setup needed.
+The `agents-workflow-models` dependency lives in this repo (`shared-models/`) and
+resolves automatically; there is nothing extra to install.
+
+> All commands below were tested end-to-end with `uv` on a clean machine.
+
+**Install the `workflow` tool** (puts `workflow` on your `PATH`):
+
+```bash
+uv tool install "git+https://github.com/Allogy/agents-workflow-cli.git"
+workflow --help
+```
+
+If `workflow` is not found afterwards, run `uv tool update-shell` (adds `~/.local/bin`
+to your `PATH`) and open a new shell.
+
+**Pin a branch, tag, or commit** — append `@<ref>` to the URL:
+
+```bash
+uv tool install "git+https://github.com/Allogy/agents-workflow-cli.git@main"
+uv tool install "git+https://github.com/Allogy/agents-workflow-cli.git@<branch-or-sha>"
+```
+
+**Upgrade / reinstall**:
+
+```bash
+uv tool upgrade agents-workflow-cli          # re-resolve from the same source
+uv tool install --force "git+https://github.com/Allogy/agents-workflow-cli.git"  # force a fresh install
+```
+
+**Try it without installing anything** (one-off run via `uvx`):
+
+```bash
+uvx --from "git+https://github.com/Allogy/agents-workflow-cli.git" workflow --help
+```
+
+**Use a local copy** — clone the repo, then either install the tool from the
+checkout or work inside it:
+
+```bash
+git clone https://github.com/Allogy/agents-workflow-cli.git
+uv tool install ./agents-workflow-cli              # install from the local checkout
+uv tool install --editable ./agents-workflow-cli   # editable: source edits apply immediately
+```
+
+The editable variant is ideal when developing the CLI itself: change a file, run
+`workflow ...` again, and the change is live — no reinstall. Alternatively, work
+fully inside the clone without installing a tool at all (see Quick Start above):
+
+```bash
+cd agents-workflow-cli && uv sync --all-groups && uv run workflow --help
+```
+
+> This GitHub repository mirrors the internal mainline (`main` branch only) and is
+> synced manually after internal merges — it may briefly lag the internal repo.
+
 ## Install from CodeArtifact (Private)
 
 The CLI and shared models are published to a private AWS CodeArtifact registry.
 
 All `make` targets below run **from the parent repo root** (`agents_platform_services/`),
-not from this submodule directory, and require working AWS credentials for account
-`522946686627` (e.g. `aws sso login`).
+not from this submodule directory, and require working AWS credentials for the
+platform's AWS account (e.g. `aws sso login`). The account ID is internal — see
+[`docs/codeartifact.md`](docs/codeartifact.md) for how to retrieve it.
 
 **One-shot install (recommended)** — fetches the token, builds the authenticated
 index URL, and installs the `workflow` tool in a single step, so there is no token

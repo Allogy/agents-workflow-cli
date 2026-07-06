@@ -3,6 +3,7 @@ name = "agents-workflow-cli"
 version = "0.1.0"
 description = "CLI tool for managing and executing workflows on the Agents Platform"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.13,<4.0"
 dependencies = [
     "typer>=0.15.0",
