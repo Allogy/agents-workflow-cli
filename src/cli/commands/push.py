@@ -477,11 +477,16 @@ def build_node_parameters(
             'operationHint',
             'timeoutSeconds',
             'saveToMemory',
-            'memoryFilePath',
             'responseVariableMappings',
         ):
             if key in node_config:
                 params[key] = node_config[key]
+        # memoryFilePath is a templated path (e.g. '{{slug.output.id}}.json') —
+        # rewrite slug references to node UUIDs so the runtime can resolve them.
+        if 'memoryFilePath' in node_config:
+            params['memoryFilePath'] = _replace_slugs_with_uuids(
+                node_config['memoryFilePath'], slug_to_uuid
+            )
         # headers/callParams values carry {{slug.output.…}} templates that must
         # be rewritten to node UUIDs, same as primaryInput. Keys pass through
         # unchanged.

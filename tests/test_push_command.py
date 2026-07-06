@@ -1832,6 +1832,28 @@ def test_api_consumption_forwards_headers_and_call_params():
     }
 
 
+def test_api_consumption_rewrites_memory_file_path_slugs():
+    """memoryFilePath is templated — slug refs are rewritten to UUIDs like primaryInput."""
+    list_uuid = UUID('33333333-3333-3333-3333-333333333333')
+    slug_to_uuid = {'list_recordings': list_uuid}
+    node_config = {
+        'connectorId': '44444444-4444-4444-4444-444444444444',
+        'operationHint': 'downloadPhoneTranscript',
+        'saveToMemory': True,
+        'memoryFilePath': '{{list_recordings.output.recording_id}}.json',
+    }
+    node_def = NodeDefinition.model_construct(
+        type='api_consumption',
+        execution_mode='MESSAGES',
+        label='Download Transcript',
+        config=node_config,
+    )
+    params = build_node_parameters(node_def, 'download-transcript', node_config, slug_to_uuid)
+
+    assert params['saveToMemory'] is True
+    assert params['memoryFilePath'] == f'{{{{{list_uuid}.output.recording_id}}}}.json'
+
+
 def test_api_consumption_omits_headers_and_call_params_when_absent():
     """headers/callParams keys are omitted from params when not set in the WDF config."""
     node_config = {
