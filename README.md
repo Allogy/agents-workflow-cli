@@ -301,7 +301,11 @@ uv run workflow review --run-id <id> --node-id <id> --approve
 The CLI includes a typed HTTP client (`WorkflowClient`) for communicating with
 the Agents Platform REST API. It uses **httpx** (synchronous mode) with
 `X-API-Key` authentication, and returns validated **Pydantic models** from the
-shared-models package.
+shared-models package. If the `WORKFLOW_JWT` environment variable is set, its
+value is additionally sent as an `Authorization: Bearer` token (with
+`X-Organization-Id`) so the CLI can reach endpoints that require a user JWT
+rather than an API key (e.g. workflow creation on environments that reject
+API-key auth there).
 
 ### Quick Start
 
