@@ -1062,3 +1062,64 @@ def test_api_consumption_response_variable_mappings_via_node_definition():
     assert isinstance(node.parsed_config, _Cfg)
     assert node.parsed_config.responseVariableMappings[0].variable == 'primary_type'
     assert node.parsed_config.responseVariableMappings[0].jsonPath == 'types[0].type.name'
+
+
+def test_api_consumption_headers_and_call_params_default_to_none():
+    """headers/callParams default to None when omitted."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig
+
+    cfg = ApiConsumptionConfig(connectorId='zoom-phone')
+    assert cfg.headers is None
+    assert cfg.callParams is None
+
+
+def test_api_consumption_headers_and_call_params_round_trip():
+    """headers/callParams parse and re-serialize without loss."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig
+
+    raw = {
+        'connectorId': 'zoom-phone',
+        'operationHint': 'listPhoneRecordings',
+        'headers': {'authorization': 'Bearer {{get_token.output.access_token}}'},
+        'callParams': {
+            'from': '{{manual_input.output.formData.from}}',
+            'to': '{{manual_input.output.formData.to}}',
+            'recording_type': 'Automatic',
+        },
+    }
+    cfg = ApiConsumptionConfig.model_validate(raw)
+    assert cfg.headers == {'authorization': 'Bearer {{get_token.output.access_token}}'}
+    assert cfg.callParams == {
+        'from': '{{manual_input.output.formData.from}}',
+        'to': '{{manual_input.output.formData.to}}',
+        'recording_type': 'Automatic',
+    }
+
+    # Re-serialize and confirm the fields survive the round trip (Pydantic
+    # extra='ignore' would silently drop them if the schema omitted them).
+    dumped = cfg.model_dump()
+    assert dumped['headers'] == raw['headers']
+    assert dumped['callParams'] == raw['callParams']
+
+
+def test_api_consumption_headers_and_call_params_via_node_definition():
+    """NodeDefinition dispatches headers/callParams to ApiConsumptionConfig."""
+    from workflow_models.wdf.nodes import ApiConsumptionConfig as _Cfg
+
+    node = NodeDefinition.model_validate(
+        {
+            'type': 'api_consumption',
+            'execution_mode': 'MESSAGES',
+            'label': 'List Phone Recordings',
+            'config': {
+                'connectorId': 'zoom-phone',
+                'headers': {'authorization': 'Bearer {{get_token.output.access_token}}'},
+                'callParams': {'from': '{{manual_input.output.formData.from}}'},
+            },
+        }
+    )
+    assert isinstance(node.parsed_config, _Cfg)
+    assert node.parsed_config.headers == {
+        'authorization': 'Bearer {{get_token.output.access_token}}'
+    }
+    assert node.parsed_config.callParams == {'from': '{{manual_input.output.formData.from}}'}

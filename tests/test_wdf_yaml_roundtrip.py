@@ -482,6 +482,11 @@ nodes:
           jsonPath: "types[0].type.name"
         - variable: first_id
           jsonPath: "data.results[0].id"
+      headers:
+        authorization: "Bearer {{user_q.output.token}}"
+      callParams:
+        from: "2026-01-01"
+        to: "2026-01-31"
 edges:
   - from: user_q
     to: ask_api
@@ -510,3 +515,7 @@ exit: ask_api
         {'variable': 'primary_type', 'jsonPath': 'types[0].type.name'},
         {'variable': 'first_id', 'jsonPath': 'data.results[0].id'},
     ]
+    # headers/callParams must survive the round trip (would be silently
+    # dropped by Pydantic extra='ignore' if the schema omitted them).
+    assert rt['headers'] == {'authorization': 'Bearer {{user_q.output.token}}'}
+    assert rt['callParams'] == {'from': '2026-01-01', 'to': '2026-01-31'}
