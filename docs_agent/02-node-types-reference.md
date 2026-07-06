@@ -316,6 +316,8 @@ Config fields:
 | `saveToMemory` | boolean | No | When `true`, stream the HTTP response body to a file in the run's memory scope instead of parsing it inline. Defaults to `false`. |
 | `memoryFilePath` | string | No | Templated, path-confined relative path under the run memory scope (e.g. `transcripts/{{trigger.output.meeting_uuid}}.vtt`). Only used when `saveToMemory` is `true`. Defaults to `api/{node_id}/response.<ext>` when omitted. Must be relative — absolute paths and `..` segments are rejected. |
 | `responseVariableMappings` | list of objects | No | Extract JSON paths from the response body and expose them as named output variables. Each entry is `{ variable: <name>, jsonPath: <glom path> }`. `jsonPath` is a [glom](https://glom.readthedocs.io/) path into the parsed JSON response (e.g. `types[0].type.name`, `data.results[0].id`, `name`); `variable` is the output name, referenced downstream as `{{node.output.<variable>}}`. Defaults to an empty list. |
+| `headers` | map of string to string | No | Templated per-request HTTP headers (e.g. `authorization: 'Bearer {{get_token.output.access_token}}'`). Merged by the executor with the connector's auth headers, where connector auth wins on collision. |
+| `callParams` | map of string to string | No | Templated query/call parameters (e.g. a `from`/`to` date window) forwarded to the planner. |
 
 When `saveToMemory` is `true`, the node exposes the response as a memory file rather than inline text. Feed the resulting file into a downstream `memory_file_url` node to produce a signed download URL:
 

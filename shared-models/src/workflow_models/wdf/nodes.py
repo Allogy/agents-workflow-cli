@@ -362,6 +362,13 @@ class ApiConsumptionConfig(BaseModel):
     # parsed JSON response to an output ``variable`` referenced downstream as
     # ``{{node.output.<variable>}}``.
     responseVariableMappings: list[ApiResponseFieldMapping] = Field(default_factory=list)
+    # Templated per-request HTTP headers (e.g. ``authorization: 'Bearer
+    # {{get_token.output.access_token}}'``). Merged by the executor with the
+    # connector's auth headers, where connector auth wins on collision.
+    headers: dict[str, str] | None = None
+    # Templated query/call parameters (e.g. a ``from``/``to`` date window)
+    # forwarded to the planner.
+    callParams: dict[str, str] | None = None
 
 
 # ============================================

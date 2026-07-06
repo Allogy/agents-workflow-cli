@@ -482,6 +482,15 @@ def build_node_parameters(
         ):
             if key in node_config:
                 params[key] = node_config[key]
+        # headers/callParams values carry {{slug.output.…}} templates that must
+        # be rewritten to node UUIDs, same as primaryInput. Keys pass through
+        # unchanged.
+        for key in ('headers', 'callParams'):
+            if node_config.get(key) is not None:
+                params[key] = {
+                    header_key: _replace_slugs_with_uuids(header_value, slug_to_uuid)
+                    for header_key, header_value in node_config[key].items()
+                }
 
     elif node_type == 'structured_input':
         # schema stays in config, not parameters

@@ -1799,6 +1799,56 @@ def test_api_consumption_build_node_parameters():
     assert params['timeoutSeconds'] == 30
 
 
+def test_api_consumption_forwards_headers_and_call_params():
+    """headers/callParams survive push, with slug refs in values rewritten to UUIDs."""
+    token_uuid = UUID('22222222-2222-2222-2222-222222222222')
+    input_uuid = UUID('11111111-1111-1111-1111-111111111111')
+    slug_to_uuid = {'get_token': token_uuid, 'manual_input': input_uuid}
+    node_config = {
+        'connectorId': '44444444-4444-4444-4444-444444444444',
+        'operationHint': 'listPhoneRecordings',
+        'headers': {'authorization': 'Bearer {{get_token.output.access_token}}'},
+        'callParams': {
+            'from': '{{manual_input.output.formData.from}}',
+            'to': '{{manual_input.output.formData.to}}',
+            'recording_type': 'Automatic',
+        },
+    }
+    node_def = NodeDefinition.model_construct(
+        type='api_consumption',
+        execution_mode='MESSAGES',
+        label='List Phone Recordings',
+        config=node_config,
+    )
+    params = build_node_parameters(node_def, 'list-recordings', node_config, slug_to_uuid)
+
+    assert params['headers'] == {
+        'authorization': f'Bearer {{{{{token_uuid}.output.access_token}}}}'
+    }
+    assert params['callParams'] == {
+        'from': f'{{{{{input_uuid}.output.formData.from}}}}',
+        'to': f'{{{{{input_uuid}.output.formData.to}}}}',
+        'recording_type': 'Automatic',
+    }
+
+
+def test_api_consumption_omits_headers_and_call_params_when_absent():
+    """headers/callParams keys are omitted from params when not set in the WDF config."""
+    node_config = {
+        'connectorId': '44444444-4444-4444-4444-444444444444',
+        'operationHint': 'getSales',
+    }
+    node_def = NodeDefinition.model_construct(
+        type='api_consumption',
+        execution_mode='MESSAGES',
+        label='Query API',
+        config=node_config,
+    )
+    params = build_node_parameters(node_def, 'ask-api', node_config, {})
+    assert 'headers' not in params
+    assert 'callParams' not in params
+
+
 @pytest.mark.parametrize(
     'wdf_type,base_config',
     [
