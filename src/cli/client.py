@@ -2,6 +2,10 @@
 
 Provides ``WorkflowClient``, an httpx-based synchronous client that
 communicates with the platform's REST API using X-API-Key authentication.
+When the ``WORKFLOW_JWT`` environment variable is set, its value is also
+sent as a ``Bearer`` token (with ``X-Organization-Id``) so the CLI can
+reach endpoints that require a user JWT rather than an API key (e.g.
+workflow creation on environments that reject API-key auth there).
 
 Supports:
   - V1 workflow CRUD operations
@@ -21,6 +25,7 @@ Usage::
 from __future__ import annotations
 
 import mimetypes
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -163,9 +168,14 @@ class WorkflowClient:
         self._base_url = host.rstrip('/')
         self._api_key = api_key
         self._org_id = org_id
+        headers = {'X-API-Key': api_key}
+        jwt = os.environ.get('WORKFLOW_JWT', '').strip()
+        if jwt:
+            headers['Authorization'] = f'Bearer {jwt}'
+            headers['X-Organization-Id'] = org_id
         self._client = httpx.Client(
             base_url=self._base_url,
-            headers={'X-API-Key': api_key},
+            headers=headers,
             timeout=timeout,
         )
 

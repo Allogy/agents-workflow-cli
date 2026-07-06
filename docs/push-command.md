@@ -305,6 +305,9 @@ The push command requires CLI configuration (same as other commands):
 export WORKFLOW_API_HOST=https://api.sb.allogy.com
 export WORKFLOW_API_KEY=your-api-key
 export WORKFLOW_ORG_ID=your-org-uuid
+# Optional: send a user JWT as a Bearer token for endpoints that reject
+# API-key auth (e.g. workflow creation on some environments).
+export WORKFLOW_JWT=your-jwt-access-token
 ```
 
 **Or config file (`~/.workflow/config.yaml`):**

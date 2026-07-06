@@ -161,6 +161,8 @@ The pull command requires CLI configuration (same as other commands):
 export WORKFLOW_API_HOST=https://api.sb.allogy.com
 export WORKFLOW_API_KEY=your-api-key
 export WORKFLOW_ORG_ID=your-org-uuid
+# Optional: user JWT sent as a Bearer token for endpoints that reject API-key auth.
+export WORKFLOW_JWT=your-jwt-access-token
 ```
 
 **Or CLI flags:**
