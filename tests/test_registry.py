@@ -10,7 +10,6 @@ BDD Scenarios:
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -19,15 +18,12 @@ import httpx
 import pytest
 
 from cli.registry import (
-    CACHE_PATH,
     RegistryCache,
-    RegistryResult,
     fetch_registry,
     get_registry,
     load_cache,
     save_cache,
 )
-
 
 SAMPLE_REGISTRY = {
     'version': '1.0',
