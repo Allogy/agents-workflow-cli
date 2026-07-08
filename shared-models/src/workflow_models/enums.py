@@ -22,9 +22,6 @@ class NodeConfigType(str, Enum):
     # Data retrieval
     RETRIEVE = 'RETRIEVE'
 
-    # Tabular validation
-    DATA_SEGMENTATION = 'DATA_SEGMENTATION'
-
     # Input nodes
     PLAIN_TXT_INPUT = 'PLAIN_TXT_INPUT'
     STRUCTURED_INPUT = 'STRUCTURED_INPUT'
