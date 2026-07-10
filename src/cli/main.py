@@ -517,14 +517,6 @@ def status(
             help='Output raw JSON response.',
         ),
     ] = False,
-    yes: Annotated[
-        bool,
-        typer.Option(
-            '--yes',
-            '-y',
-            help='Skip the confirmation prompt (for non-interactive use)',
-        ),
-    ] = False,
     workflow_id: Annotated[
         str | None,
         typer.Option(
@@ -605,6 +597,14 @@ def input_cmd(
         typer.Option(
             '--json',
             help='Output raw JSON response.',
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            '--yes',
+            '-y',
+            help='Skip the confirmation prompt (for non-interactive use)',
         ),
     ] = False,
     workflow_id: Annotated[
