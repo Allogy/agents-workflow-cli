@@ -37,6 +37,7 @@ def input_command(
     *,
     run_id: str | None = None,
     json_output: bool = False,
+    yes: bool = False,
     working_dir: Path | None = None,
     workflow_id_override: str | None = None,
 ) -> None:
@@ -51,6 +52,7 @@ def input_command(
         data: Input data as JSON string or @filepath (None -> empty dict).
         run_id: Optional explicit run ID (overrides .last_run run_id).
         json_output: If True, print raw JSON response and return.
+        yes: If True, skip the confirmation prompt.
         working_dir: Directory for .last_run lookup (defaults to cwd).
         workflow_id_override: Explicit workflow ID (overrides .last_run). Requires run_id.
 
@@ -126,8 +128,7 @@ def input_command(
             )
 
         # Confirmation prompt
-        confirmed = Confirm.ask(f'Submit input to node {node_id}?', default=True)
-        if not confirmed:
+        if not yes and not Confirm.ask(f'Submit input to node {node_id}?', default=True):
             console.print('[yellow]Cancelled.[/yellow]')
             return
 

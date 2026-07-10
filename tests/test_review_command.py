@@ -150,6 +150,31 @@ class TestReviewApprove:
             feedback=None,
         )
 
+    @patch('cli.commands.review.Confirm.ask', side_effect=AssertionError('prompt should not run'))
+    @patch('cli.commands.review.WorkflowClient')
+    def test_review_yes_skips_confirmation(self, mock_client_class, mock_confirm, tmp_path):
+        """--yes bypasses the confirmation prompt and submits the review."""
+        save_last_run(tmp_path, _make_last_run_context())
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        review_command(
+            _make_mock_config(),
+            run_id=_RUN_ID,
+            node_id=_NODE_HR,
+            approve=True,
+            yes=True,
+            working_dir=tmp_path,
+        )
+
+        mock_confirm.assert_not_called()
+        mock_client.submit_review.assert_called_once_with(
+            _WORKFLOW_ID,
+            run_id=_RUN_ID,
+            decision='approve',
+            feedback=None,
+        )
+
 
 # ---------------------------------------------------------------------------
 # REV-02: Reject with comment

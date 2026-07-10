@@ -144,6 +144,33 @@ class TestInputSubmitJsonData:
         )
         mock_confirm.assert_called_once()
 
+    @patch('cli.commands.input.Confirm.ask', side_effect=AssertionError('prompt should not run'))
+    @patch('cli.commands.input.WorkflowClient')
+    def test_input_yes_skips_confirmation(self, mock_client_class, mock_confirm, tmp_path):
+        """--yes bypasses the confirmation prompt and submits the input."""
+        from cli.commands.input import input_command
+
+        save_last_run(tmp_path, _make_last_run_context())
+
+        mock_client = _make_ready_mock_client()
+        _setup_mock_client(mock_client_class, mock_client)
+
+        input_command(
+            _make_mock_config(),
+            node_id=_NODE_ID,
+            data='{"text": "hello"}',
+            yes=True,
+            working_dir=tmp_path,
+        )
+
+        mock_confirm.assert_not_called()
+        mock_client.submit_input.assert_called_once_with(
+            _WORKFLOW_ID,
+            run_id=_RUN_ID,
+            node_id=_NODE_ID,
+            input_data={'text': 'hello'},
+        )
+
 
 # ---------------------------------------------------------------------------
 # INPUT-01: Submit file data

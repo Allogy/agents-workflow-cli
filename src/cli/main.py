@@ -517,6 +517,14 @@ def status(
             help='Output raw JSON response.',
         ),
     ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            '--yes',
+            '-y',
+            help='Skip the confirmation prompt (for non-interactive use)',
+        ),
+    ] = False,
     workflow_id: Annotated[
         str | None,
         typer.Option(
@@ -633,6 +641,7 @@ def input_cmd(
             data,
             run_id=run_id,
             json_output=json_output,
+            yes=yes,
             workflow_id_override=workflow_id,
         )
     except (ValueError, FileNotFoundError) as e:
@@ -695,6 +704,14 @@ def review(
             help='Output raw JSON response.',
         ),
     ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            '--yes',
+            '-y',
+            help='Skip the confirmation prompt (for non-interactive use)',
+        ),
+    ] = False,
     workflow_id: Annotated[
         str | None,
         typer.Option(
@@ -732,6 +749,7 @@ def review(
             revise=revise,
             comment=comment,
             json_output=json_output,
+            yes=yes,
             workflow_id_override=workflow_id,
         )
     except (ValueError, FileNotFoundError) as e:
