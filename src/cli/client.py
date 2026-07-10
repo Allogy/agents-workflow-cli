@@ -79,6 +79,7 @@ class SubmitInputResponse(BaseModel):
     """Response from POST /v2/workflows/{id}/input."""
 
     workflow_id: str
+    run_id: str | None = None
     node_id: str
     status: str
     message: str
@@ -88,6 +89,7 @@ class SubmitReviewResponse(BaseModel):
     """Response from POST /v2/workflows/{id}/review."""
 
     workflow_id: str
+    run_id: str | None = None
     status: str
     message: str
 
