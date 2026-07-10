@@ -266,6 +266,7 @@ def _poll_with_retry(
     max_retries: int = 3,
     base_delay: float = 1.0,
     output_console: Console | None = None,
+    quiet: bool = False,
 ) -> Any:
     """Poll status with exponential backoff on network errors.
 
@@ -276,6 +277,7 @@ def _poll_with_retry(
         max_retries: Maximum retry attempts on network errors.
         base_delay: Base delay in seconds (doubles each retry: 1s, 2s, 4s).
         output_console: Console to use for output (for --no-color support).
+        quiet: If True, suppress retry progress output.
 
     Returns:
         WorkflowStatusResponse from the server.
@@ -293,10 +295,11 @@ def _poll_with_retry(
             if attempt == max_retries:
                 raise
             delay = base_delay * (2**attempt)  # 1s, 2s, 4s
-            out.print(
-                f'[dim]Network error, retrying in {delay:.0f}s... '
-                f'({attempt + 1}/{max_retries})[/dim]'
-            )
+            if not quiet:
+                out.print(
+                    f'[dim]Network error, retrying in {delay:.0f}s... '
+                    f'({attempt + 1}/{max_retries})[/dim]'
+                )
             time.sleep(delay)
     raise RuntimeError('Unreachable')  # pragma: no cover
 
@@ -315,6 +318,7 @@ def _stream_with_retry(
     max_retries: int = _STREAM_RETRY_ATTEMPTS,
     retry_delay: float = _STREAM_RETRY_DELAY_S,
     output_console: Console | None = None,
+    quiet: bool = False,
 ) -> Any:
     """Open SSE stream with retry on transient HTTP errors (502, 503).
 
@@ -335,19 +339,21 @@ def _stream_with_retry(
                 raise
             last_err = e
             if attempt < max_retries:
-                out.print(
-                    f'[dim]Transient error ({e.response.status_code}), '
-                    f'retrying in {retry_delay:.1f}s... '
-                    f'({attempt + 1}/{max_retries})[/dim]'
-                )
+                if not quiet:
+                    out.print(
+                        f'[dim]Transient error ({e.response.status_code}), '
+                        f'retrying in {retry_delay:.1f}s... '
+                        f'({attempt + 1}/{max_retries})[/dim]'
+                    )
                 time.sleep(retry_delay)
         except (httpx.ConnectError, httpx.ReadError) as e:
             last_err = e
             if attempt < max_retries:
-                out.print(
-                    f'[dim]Network error, retrying in {retry_delay:.1f}s... '
-                    f'({attempt + 1}/{max_retries})[/dim]'
-                )
+                if not quiet:
+                    out.print(
+                        f'[dim]Network error, retrying in {retry_delay:.1f}s... '
+                        f'({attempt + 1}/{max_retries})[/dim]'
+                    )
                 time.sleep(retry_delay)
             else:
                 raise
@@ -365,6 +371,7 @@ def run_polling(
     max_timeout_seconds: int | float | None = None,
     output_console: Console | None = None,
     pending_input: dict[str, Any] | None = None,
+    json_output: bool = False,
 ) -> str:
     """Poll workflow status until terminal or HITL gate.
 
@@ -379,6 +386,7 @@ def run_polling(
         output_console: Console to use for output (for --no-color support).
         pending_input: If provided, auto-submit this data to the first
             WAITING_FOR_INPUT node and continue polling (BUG-4 fix).
+        json_output: If True, suppress Rich progress output.
 
     Returns:
         Final status string (COMPLETED, FAILED, WAITING_FOR_REVIEW, etc.).
@@ -392,14 +400,20 @@ def run_polling(
     seen_nodes: list[str] = []
 
     while True:
-        status_resp = _poll_with_retry(client, workflow_id, run_id, output_console=output_console)
+        status_resp = _poll_with_retry(
+            client,
+            workflow_id,
+            run_id,
+            output_console=output_console,
+            quiet=json_output,
+        )
         status = status_resp.status
 
         current_node = status_resp.current_node
         if current_node and current_node not in seen_nodes:
             seen_nodes.append(current_node)
 
-        if current_node:
+        if current_node and not json_output:
             step = len(seen_nodes)
             if total_nodes > 0:
                 out.print(
@@ -436,13 +450,15 @@ def run_polling(
                         input_data=pending_input,
                     )
                     pending_input = None  # Only auto-submit once
-                    out.print(f'[green]Auto-submitted input to {waiting_node}[/green]')
+                    if not json_output:
+                        out.print(f'[green]Auto-submitted input to {waiting_node}[/green]')
                     if poll_interval > 0:
                         time.sleep(poll_interval)
                     continue  # Resume polling
                 except Exception as e:
                     pending_input = None  # Don't retry on failure
-                    out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
+                    if not json_output:
+                        out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
 
         if effective_status in _TERMINAL_STATUSES or effective_status in _HITL_STATUSES:
             return effective_status if effective_status != status_upper else status
@@ -452,10 +468,11 @@ def run_polling(
 
         elapsed = time.monotonic() - start_time
         if elapsed >= timeout:
-            out.print(
-                f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
-                f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
-            )
+            if not json_output:
+                out.print(
+                    f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                    f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+                )
             sys.exit(1)
 
 
@@ -782,6 +799,7 @@ def run_streaming(
     output_console: Console | None = None,
     pending_input: dict[str, Any] | None = None,
     submit_input_fn: Callable[[str, dict[str, Any]], Any] | None = None,
+    json_output: bool = False,
 ) -> StreamResult:
     """Process SSE event lines until terminal or HITL event.
 
@@ -794,6 +812,7 @@ def run_streaming(
         output_console: Console to use for output (for --no-color support).
         pending_input: Pre-supplied input data to auto-submit on WAITING_FOR_INPUT (BUG-4).
         submit_input_fn: Callable(node_id, data) used to submit pending_input automatically.
+        json_output: If True, emit raw decoded event dicts as compact NDJSON.
 
     Returns:
         StreamResult with final event type and accumulated node results.
@@ -815,12 +834,16 @@ def run_streaming(
         if event is None:
             continue
 
+        if json_output:
+            print(json.dumps(event.data, separators=(',', ':'), default=str), flush=True)
+
         event_type_upper = event.event_type.upper()
         node_id = event.data.get('node_id', '')
 
         # Handle CUSTOM SSE_PAUSING: stream is about to close for HITL
         if event_type_upper == 'CUSTOM' and event.data.get('name') == 'SSE_PAUSING':
-            out.print(fmt(event, step=len(seen_nodes), total_nodes=total_nodes))
+            if not json_output:
+                out.print(fmt(event, step=len(seen_nodes), total_nodes=total_nodes))
             last_event_type = event.event_type
             continue
 
@@ -830,15 +853,17 @@ def run_streaming(
             and event_type_upper not in _SSE_TERMINAL_EVENTS
             and event_type_upper not in _SSE_HITL_EVENTS
         ):
-            out.print(format_unknown_event(event))
+            if not json_output:
+                out.print(format_unknown_event(event))
             last_event_type = event.event_type
             # Check timeout even for unknown events
             elapsed = time.monotonic() - start_time
             if elapsed >= timeout:
-                out.print(
-                    f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
-                    f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
-                )
+                if not json_output:
+                    out.print(
+                        f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                        f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+                    )
                 sys.exit(1)
             continue
 
@@ -897,20 +922,23 @@ def run_streaming(
             seen_nodes.append(node_id)
 
         step = len(seen_nodes)
-        out.print(fmt(event, step=step, total_nodes=total_nodes))
+        if not json_output:
+            out.print(fmt(event, step=step, total_nodes=total_nodes))
         last_event_type = event.event_type
 
         # Normalize to uppercase for comparison (backend returns mixed case)
         if last_event_type.upper() in _SSE_HITL_EVENTS:
             # Print actionable HITL hint
             hitl_node_id = event.data.get('node_id', '<node-id>')
-            if last_event_type.upper() == 'WAITING_FOR_INPUT' and not (
-                pending_input is not None and submit_input_fn is not None
+            if (
+                not json_output
+                and last_event_type.upper() == 'WAITING_FOR_INPUT'
+                and not (pending_input is not None and submit_input_fn is not None)
             ):
                 out.print(
                     f"  [dim]Next: workflow input --node-id {hitl_node_id} --data '{{...}}'[/dim]"
                 )
-            elif last_event_type.upper() == 'WAITING_FOR_REVIEW':
+            elif not json_output and last_event_type.upper() == 'WAITING_FOR_REVIEW':
                 out.print('  [dim]Next: workflow review --approve[/dim]')
             # Auto-submit pending input in streaming mode (BUG-4)
             if (
@@ -920,34 +948,38 @@ def run_streaming(
             ):
                 try:
                     submit_input_fn(hitl_node_id, pending_input)
-                    out.print(f'[green]Auto-submitted input to {hitl_node_id}[/green]')
+                    if not json_output:
+                        out.print(f'[green]Auto-submitted input to {hitl_node_id}[/green]')
                     pending_input = None  # Only auto-submit once
                 except Exception as e:
-                    out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
+                    if not json_output:
+                        out.print(f'[yellow]Auto-submit failed: {e}[/yellow]')
                     pending_input = None  # Don't retry on failure
             return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         if last_event_type.upper() in _SSE_TERMINAL_EVENTS:
-            if last_event_type.upper() == 'RUN_FINISHED':
+            if last_event_type.upper() == 'RUN_FINISHED' and not json_output:
                 _print_summary_table(list(node_results.values()), out)
             return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
         elapsed = time.monotonic() - start_time
         if elapsed >= timeout:
-            out.print(
-                f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
-                f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
-            )
+            if not json_output:
+                out.print(
+                    f'[bold red]Timeout after {_format_duration(int(timeout))}.[/bold red] '
+                    f'Workflow may still be running. Use [cyan]workflow status[/cyan] to check.'
+                )
             sys.exit(1)
 
     # Stream ended without terminal event -- connection may have been interrupted
     if last_event_type.upper() not in _SSE_TERMINAL_EVENTS and last_event_type.upper() not in (
         _SSE_HITL_EVENTS
     ):
-        out.print(
-            '[bold yellow]Warning:[/bold yellow] Stream interrupted before completion. '
-            'Use [cyan]workflow status[/cyan] to check current state.'
-        )
+        if not json_output:
+            out.print(
+                '[bold yellow]Warning:[/bold yellow] Stream interrupted before completion. '
+                'Use [cyan]workflow status[/cyan] to check current state.'
+            )
 
     return StreamResult(final_event=last_event_type, nodes=list(node_results.values()))
 
@@ -1142,6 +1174,33 @@ def _run_interactive(
     return result
 
 
+def _emit_run_json_result(
+    *,
+    run_id: str,
+    workflow_id: str,
+    final_status: str,
+    status_resp: Any | None,
+) -> None:
+    """Emit the final machine-readable run result as one compact JSON line."""
+    node_outputs: dict[str, Any] = {}
+    if status_resp is not None:
+        node_outputs = (status_resp.state or {}).get('node_outputs', {}) or {}
+
+    print(
+        json.dumps(
+            {
+                'run_id': run_id,
+                'workflow_id': workflow_id,
+                'final_status': final_status,
+                'node_outputs': node_outputs,
+            },
+            separators=(',', ':'),
+            default=str,
+        ),
+        flush=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
@@ -1156,6 +1215,7 @@ def run_command(
     interactive: bool = False,
     no_follow: bool = False,
     verbose: bool = False,
+    json_output: bool = False,
     no_color: bool = False,
     working_dir: Path | None = None,
 ) -> None:
@@ -1169,6 +1229,7 @@ def run_command(
         interactive: Enable interactive HITL mode (requires --stream + TTY).
         no_follow: Fire-and-forget mode.
         verbose: Use verbose multi-line SSE output.
+        json_output: Emit NDJSON events and a final JSON result; suppress Rich output.
         no_color: Disable colored output.
         working_dir: Directory for .last_run file (defaults to cwd).
     """
@@ -1183,6 +1244,11 @@ def run_command(
     else:
         output_console = get_console()
 
+    if json_output and interactive:
+        raise ValueError(
+            '--json cannot be used with --interactive; interactive mode requires a TTY.'
+        )
+
     # Validate interactive mode preconditions (--stream + TTY)
     if interactive:
         from cli.interactive import check_interactive_preconditions
@@ -1196,7 +1262,8 @@ def run_command(
         # Resolve identifier to UUID
         workflow_id = resolve_workflow_id(identifier, client, config.org_id, search_dir=cwd)
 
-        output_console.print(f'[bold cyan]Running workflow:[/bold cyan] {workflow_id}')
+        if not json_output:
+            output_console.print(f'[bold cyan]Running workflow:[/bold cyan] {workflow_id}')
 
         # Fetch node count for progress display
         nodes: list[Any] = []
@@ -1209,9 +1276,10 @@ def run_command(
         if stream:
             # SSE streaming mode
             run_id = str(uuid_mod.uuid4())
-            output_console.print(f'[dim]Run ID: {run_id}[/dim]')
-            output_console.print('[dim]Mode: SSE streaming[/dim]')
-            output_console.print()
+            if not json_output:
+                output_console.print(f'[dim]Run ID: {run_id}[/dim]')
+                output_console.print('[dim]Mode: SSE streaming[/dim]')
+                output_console.print()
 
             # Write .last_run before starting
             ctx = LastRunContext(
@@ -1228,6 +1296,7 @@ def run_command(
                 run_id=run_id,
                 inputs=inputs,
                 output_console=output_console,
+                quiet=json_output,
             ) as response:
                 result = run_streaming(
                     response.iter_lines(),
@@ -1241,6 +1310,7 @@ def run_command(
                         node_id=nid,
                         input_data=payload,
                     ),
+                    json_output=json_output,
                 )
                 final_status = result.final_event
 
@@ -1283,7 +1353,8 @@ def run_command(
             start_resp = client.start_workflow_temporal(workflow_id, inputs=inputs)
             run_id = start_resp.run_id
 
-            output_console.print(f'[dim]Run ID: {run_id}[/dim]')
+            if not json_output:
+                output_console.print(f'[dim]Run ID: {run_id}[/dim]')
 
             # Write .last_run
             ctx = LastRunContext(
@@ -1295,6 +1366,14 @@ def run_command(
             save_last_run(cwd, ctx)
 
             if no_follow:
+                if json_output:
+                    _emit_run_json_result(
+                        run_id=run_id,
+                        workflow_id=workflow_id,
+                        final_status=start_resp.status,
+                        status_resp=None,
+                    )
+                    return
                 output_console.print(f'[green]Workflow started.[/green] Run ID: {run_id}')
                 output_console.print(f'[dim]Check status: workflow status {run_id}[/dim]')
                 if inputs:
@@ -1305,8 +1384,9 @@ def run_command(
                 return
 
             # Polling mode
-            output_console.print('[dim]Mode: polling (2s interval)[/dim]')
-            output_console.print()
+            if not json_output:
+                output_console.print('[dim]Mode: polling (2s interval)[/dim]')
+                output_console.print()
             final_status = run_polling(
                 client,
                 workflow_id,
@@ -1314,18 +1394,28 @@ def run_command(
                 total_nodes=total_nodes,
                 output_console=output_console,
                 pending_input=inputs if inputs else None,
+                json_output=json_output,
             )
 
-        # Fetch and display node outputs for completed runs
-        if final_status.upper() in ('COMPLETED', 'RUN_FINISHED'):
-            try:
-                final_resp = client.get_workflow_status(workflow_id, run_id)
-                _print_run_node_outputs(final_resp, nodes or None, output_console)
-            except Exception:
-                pass  # Non-critical: don't fail the run for output display errors
+        if json_output:
+            final_resp = client.get_workflow_status(workflow_id, run_id)
+            _emit_run_json_result(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                final_status=final_status,
+                status_resp=final_resp,
+            )
+        else:
+            # Fetch and display node outputs for completed runs
+            if final_status.upper() in ('COMPLETED', 'RUN_FINISHED'):
+                try:
+                    final_resp = client.get_workflow_status(workflow_id, run_id)
+                    _print_run_node_outputs(final_resp, nodes or None, output_console)
+                except Exception:
+                    pass  # Non-critical: don't fail the run for output display errors
 
-        # Handle final status
-        _print_final_status(final_status, run_id, output_console=output_console)
+            # Handle final status
+            _print_final_status(final_status, run_id, output_console=output_console)
 
         # Exit with code 1 for failure statuses (case-insensitive)
         if final_status.upper() in _FAILURE_STATUSES:

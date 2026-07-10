@@ -426,6 +426,13 @@ def run(
             help='Show detailed multi-line SSE output with payload excerpts.',
         ),
     ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            '--json',
+            help='Emit machine-readable NDJSON events + final JSON result; disables Rich output',
+        ),
+    ] = False,
     no_color: Annotated[
         bool,
         typer.Option(
@@ -476,15 +483,22 @@ def run(
             interactive=interactive,
             no_follow=no_follow,
             verbose=verbose,
+            json_output=json_output,
             no_color=no_color,
         )
     except (ValueError, FileNotFoundError) as e:
         # User errors: bad input, not found, invalid JSON -> exit 2
-        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        if json_output:
+            typer.echo(f'Error: {e}', err=True)
+        else:
+            get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(2) from e
     except Exception as e:
         # Runtime errors: network, server, timeout -> exit 1
-        get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
+        if json_output:
+            typer.echo(f'Error: {e}', err=True)
+        else:
+            get_console().print(f'[bold red]Error:[/bold red] {e}', highlight=False)
         raise typer.Exit(1) from e
 
 

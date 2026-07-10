@@ -578,6 +578,78 @@ class TestRunCommand:
         assert ctx is not None
         mock_client.stream_workflow_temporal.assert_called_once()
 
+    def test_streaming_json_outputs_ndjson_and_final_result(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--json streams raw SSE event dicts and one final JSON result without Rich output."""
+        mock_client = _make_mock_client(nodes=[])
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = iter(
+            [
+                _sse_line('RUN_STARTED'),
+                _sse_line('STEP_STARTED', node_id='n1', node_slug='extract'),
+                _sse_line('STEP_FINISHED', node_id='n1', output={'answer': 'ok'}),
+                _sse_line('RUN_FINISHED'),
+            ]
+        )
+        mock_client.stream_workflow_temporal.return_value.__enter__ = MagicMock(
+            return_value=mock_response
+        )
+        mock_client.stream_workflow_temporal.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get_workflow_status.return_value = MagicMock(
+            status='COMPLETED',
+            state={'node_outputs': {'n1': {'answer': 'ok'}}},
+        )
+
+        with (
+            patch('cli.commands.run.WorkflowClient') as MockClient,
+            patch('cli.commands.run.uuid_mod.uuid4', return_value='json-run-id'),
+        ):
+            MockClient.from_config.return_value.__enter__ = MagicMock(return_value=mock_client)
+            MockClient.from_config.return_value.__exit__ = MagicMock(return_value=False)
+
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                json_output=True,
+                working_dir=tmp_path,
+            )
+
+        lines = [line for line in capsys.readouterr().out.splitlines() if line]
+        payloads = [json.loads(line) for line in lines]
+
+        assert [payload['type'] for payload in payloads[:-1]] == [
+            'RUN_STARTED',
+            'STEP_STARTED',
+            'STEP_FINISHED',
+            'RUN_FINISHED',
+        ]
+        assert payloads[-1] == {
+            'run_id': 'json-run-id',
+            'workflow_id': '939843a8-6257-4475-bfc0-f7d6500d9f00',
+            'final_status': 'RUN_FINISHED',
+            'node_outputs': {'n1': {'answer': 'ok'}},
+        }
+        assert all(line.startswith('{') and line.endswith('}') for line in lines)
+        assert not any('Run ID' in line or 'Run Summary' in line for line in lines)
+
+    def test_json_interactive_is_invalid(self, tmp_path: Path) -> None:
+        """--json with --interactive is rejected before any stream is opened."""
+        with pytest.raises(ValueError, match='--json cannot be used with --interactive'):
+            run_command(
+                config=_make_mock_config(),
+                identifier='939843a8-6257-4475-bfc0-f7d6500d9f00',
+                input_data=None,
+                stream=True,
+                interactive=True,
+                json_output=True,
+                working_dir=tmp_path,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Case-insensitive status tests (AUDIT-02)
