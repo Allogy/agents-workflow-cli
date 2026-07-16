@@ -1346,6 +1346,7 @@ class TestExtractNodeConfig:
             'primaryInput': '{{input.output.text}}',
             'temperature': 0.7,
             'maxTokens': 2048,
+            'max_iterations': 50,
             'function_name': 'agent_1',
             'collapsed': False,
         }
@@ -1356,6 +1357,7 @@ class TestExtractNodeConfig:
         assert result['primaryInput'] == '{{input.output.text}}'
         assert result['temperature'] == 0.7
         assert result['maxTokens'] == 2048
+        assert result['max_iterations'] == 50
 
     def test_agent_from_config_fallback(self):
         """Test extracting AGENT config from config (CLI-pushed)."""
@@ -1365,11 +1367,13 @@ class TestExtractNodeConfig:
             'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
             'primaryInput': '{{input.output.text}}',
             'temperature': 0.7,
+            'max_iterations': 50,
         }
         result = extract_node_config('AGENT', parameters, config)
         assert result['model'] == 'anthropic.claude-3-5-sonnet-20241022-v2:0'
         assert result['primaryInput'] == '{{input.output.text}}'
         assert result['temperature'] == 0.7
+        assert result['max_iterations'] == 50
         # agent_id -> agentId renaming via config fallback
         assert result['agentId'] == config['agent_id']
 

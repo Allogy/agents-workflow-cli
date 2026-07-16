@@ -153,6 +153,7 @@ class TestAgentConfig:
             model='us.anthropic.claude-sonnet-4-20250514-v1:0',
             temperature=0.7,
             maxTokens=2048,
+            max_iterations=50,
             tools=[],
             agentId='general-agent',
             primaryInput='{{input.output.text}}',
@@ -160,9 +161,23 @@ class TestAgentConfig:
         assert config.model == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
         assert config.temperature == 0.7
         assert config.maxTokens == 2048
+        assert config.max_iterations == 50
         assert config.tools == []
         assert config.agentId == 'general-agent'
         assert config.primaryInput == '{{input.output.text}}'
+
+    def test_max_iterations_bounds(self):
+        """max_iterations should be > 0 and <= 100."""
+        config = AgentConfig(max_iterations=50)
+        assert config.max_iterations == 50
+        assert AgentConfig(max_iterations=1).max_iterations == 1
+        assert AgentConfig(max_iterations=100).max_iterations == 100
+
+        with pytest.raises(ValidationError):
+            AgentConfig(max_iterations=0)
+
+        with pytest.raises(ValidationError):
+            AgentConfig(max_iterations=101)
 
     def test_temperature_range(self):
         """Temperature should be between 0 and 2."""

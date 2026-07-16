@@ -425,6 +425,36 @@ exit: agent
         wf2 = load_workflow_yaml(output_yaml)
         assert wf2.nodes['agent'].config['system_prompt'] == 'You are a helpful assistant'
 
+    def test_max_iterations_on_agent_roundtrip(self):
+        """max_iterations in agent config survives parse -> dump -> parse."""
+        yaml_str = """\
+name: Max Iterations Test
+nodes:
+  input:
+    type: plain_txt_input
+    execution_mode: INPUT
+    config:
+      placeholder: "Enter text"
+  agent:
+    type: agent
+    execution_mode: MESSAGES
+    config:
+      primaryInput: "{{input.output.text}}"
+      use_rlm: true
+      max_iterations: 50
+edges:
+  - from: input
+    to: agent
+entry: input
+exit: agent
+"""
+        wf = load_workflow_yaml(yaml_str)
+        assert wf.nodes['agent'].config['max_iterations'] == 50
+
+        output_yaml = dump_workflow_yaml(wf)
+        wf2 = load_workflow_yaml(output_yaml)
+        assert wf2.nodes['agent'].config['max_iterations'] == 50
+
     def test_new_fields_absent_when_not_set(self):
         """When new fields are not set, they do not appear in dumped YAML."""
         yaml_str = """\
