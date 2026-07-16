@@ -172,6 +172,7 @@ _NODE_TYPE_PARAM_FIELDS: dict[str, dict[str, str | None]] = {
         'systemPrompt': 'system_prompt',
         'use_rlm': None,
         'web_tools_enabled': None,
+        'max_iterations': None,
         'saveToMemory': None,
         'memoryFilePath': None,
     },
@@ -241,6 +242,7 @@ _NODE_TYPE_CONFIG_FIELDS: dict[str, dict[str, str | None]] = {
         'agent_id': 'agentId',
         'use_rlm': None,
         'web_tools_enabled': None,
+        'max_iterations': None,
     },
     'STRUCTURED_INPUT': {
         'schema': None,
