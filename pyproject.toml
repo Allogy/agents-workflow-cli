@@ -1,6 +1,6 @@
 [project]
 name = "agents-workflow-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI tool for managing and executing workflows on the Agents Platform"
 readme = "README.md"
 license = "MIT"
@@ -11,7 +11,7 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.27.0",
     "jsonschema>=4.23.0",
-    "agents-workflow-models==0.1.2",
+    "agents-workflow-models==0.1.5",
 ]
 
 [tool.uv.sources]
