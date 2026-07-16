@@ -62,7 +62,7 @@ for yaml in test-*.workflow.yaml; do
 done
 ```
 
-**Expected:** All 7 files show "All 10 checks passed".
+**Expected:** All 7 files show validation passed (13 checks when registry is available; 3 registry checks SKIP with `--offline`).
 
 ### Step 1.3: Push all templates
 

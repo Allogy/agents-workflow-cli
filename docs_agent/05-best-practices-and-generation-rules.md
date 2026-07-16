@@ -32,6 +32,8 @@ When generating workflows, follow these rules for reliable output:
 | A pre-configured AI agent handles the task | `agent` |
 | An AI agent with knowledge base access handles the task | `rag_agent` |
 | A human reviews and approves/rejects | `human_review` |
+| Live data or large HTTP response bodies from an API connector | `api_consumption` |
+| Signed download link for a file in run memory | `memory_file_url` |
 
 ## Model Selection
 

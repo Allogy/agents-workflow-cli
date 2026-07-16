@@ -97,13 +97,15 @@ from workflow_models.wdf import (
 | `PlainTxtInputConfig` | `PLAIN_TXT_INPUT` | Plain text input with optional placeholder |
 | `StructuredInputConfig` | `STRUCTURED_INPUT` | JSON-schema-driven form input |
 | `FileUploadConfig` | `FILE_UPLOAD` | File upload with accepted types and size limits |
+| `MemoryFileUrlConfig` | `MEMORY_FILE_URL` | Signed download URL for a file in run memory |
 | `AgentConfig` | `AGENT` | LLM agent with model, temperature, system prompt, optional `use_rlm` flag to route through the RLM (beta) runner, optional `web_tools_enabled` flag to attach `web_search` / `web_fetch` tools |
 | `RagAgentConfig` | `RAG_AGENT` | RAG-enhanced agent with retrieval parameters |
 | `LlmCallConfig` | `LLM_CALL` | Direct LLM invocation (no agent loop) |
-| `StructuredOutputConfig` | `STRUCTURED_OUTPUT` | Render structured data via template |
+| `StructuredOutputConfig` | `STRUCTURED_OUTPUT` | LLM output validated against a JSON Schema |
 | `RetrieveConfig` | `RETRIEVE` | Vector store retrieval with top_k / threshold |
-| `DocumentExtractionConfig` | `DOCUMENT_EXTRACTION` | Extract structured fields from documents |
+| `DocumentExtractionConfig` | `DOCUMENT_EXTRACTION` | Legacy field extraction (schema-valid; CLI unsupported) |
 | `HumanReviewConfig` | `HUMAN_REVIEW` | Human approval / rejection gate |
+| `ApiConsumptionConfig` | `API_CONSUMPTION` | External HTTP API via org-scoped connector |
 
 **Variable reference utilities:**
 
@@ -161,11 +163,13 @@ refs = extract_variable_refs('Answer: {{agent.output.response}}')
 Example `.workflow.yaml` files are in the [`examples/`](examples/) directory:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice pipeline
-- `all-node-types.workflow.yaml` — reference file with all 9 CLI-supported node types
+- `all-node-types.workflow.yaml` — reference file with all 11 CLI-supported node types
 - `linear-pipeline.workflow.yaml` — 3-node pipeline (text input → LLM → structured output)
 - `rag-workflow.workflow.yaml` — 4-node RAG pipeline (structured input → file upload → LLM → RAG agent)
 - `agent-review.workflow.yaml` — 4-node agent pipeline with human review gate
-- `retrieval-pipeline.workflow.yaml` — 5-node retrieval pipeline with document extraction
+- `retrieval-pipeline.workflow.yaml` — 5-node retrieval pipeline (input → retrieve → LLM → structured output → review)
+
+Full WDF authoring guide: [`../docs_agent/README.md`](../docs_agent/README.md).
 
 > **Note:** YAML serialization (load/dump) lives in the CLI layer
 > (`cli.wdf_yaml`), not in shared-models. The shared-models package has

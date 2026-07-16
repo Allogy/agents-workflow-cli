@@ -104,6 +104,17 @@ Example: `{{extract.output.structured}}`
 
 Example: `{{review.output.feedback}}`
 
+### memory_file_url
+
+| Path | Type | Description |
+|------|------|-------------|
+| `output.url` | string | Signed download URL for the file at `config.path` |
+| `output.filename` | string | Base filename derived from the memory path |
+
+Example: `{{transcript_url.output.url}}` or `{{transcript_url.output.filename}}`
+
+Typical upstream path for `config.path`: `{{api_node.output.memory_file_path}}` from an `api_consumption` node with `saveToMemory: true`.
+
 ### api_consumption
 
 When `saveToMemory` is `false` (default), the parsed response body is available inline. When `saveToMemory` is `true`, the response body is written to the run memory scope and the node exposes file metadata instead.

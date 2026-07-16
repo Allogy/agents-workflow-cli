@@ -1,4 +1,4 @@
-"""WDF node config schemas for all 10 node types.
+"""WDF node config schemas for all 12 node types.
 
 Each node type has a dedicated Pydantic v2 config model that validates
 the config block in a .workflow.yaml file. NodeDefinition wraps the

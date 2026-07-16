@@ -177,7 +177,7 @@ workflow-cli/
       interactive.py          # HITL interactive prompting
       commands/
         init.py               # Scaffold workflows from templates
-        validate.py           # Offline validation (10 checks)
+        validate.py           # Offline validation (13 checks)
         push.py               # Deploy workflows to platform
         pull.py               # Export workflows from platform to YAML
         list.py               # List workflows in organization
@@ -187,7 +187,7 @@ workflow-cli/
         input.py              # Submit data to paused INPUT nodes
         review.py             # Submit HUMAN_REVIEW decisions
       validation/
-        runner.py             # Validation runner (10 checks)
+        runner.py             # Validation runner (13 checks)
       templates/              # 7 built-in scaffold templates
   shared-models/              # agents-workflow-models (published separately)
     pyproject.toml
@@ -197,7 +197,7 @@ workflow-cli/
       schemas/                # API-oriented schemas (Create/Update/Public)
       wdf/                    # WDF models — YAML-oriented workflow definitions
         __init__.py           #   Re-exports all WDF types
-        nodes.py              #   NodeDefinition + 10 node config schemas
+        nodes.py              #   NodeDefinition + 12 node config schemas
         edges.py              #   EdgeDefinition (source/target slug-based)
         workflow.py           #   WorkflowDefinition (root model with validation)
         validation.py         #   Graph validation (reachability, cycles, variables)
@@ -406,6 +406,8 @@ workflows as human-readable files. WDF files use slug-keyed nodes, variable
 references (`{{slug.output.field}}`), and typed edge definitions — no UUIDs
 required.
 
+**Authoring reference:** [`docs_agent/README.md`](docs_agent/README.md) (syntax, node types, variables, examples).
+
 The **Pydantic models** (validation, type checking) live in the shared-models
 package (`workflow_models.wdf`). The **YAML layer** (load/dump via PyYAML) lives
 in the CLI (`cli.wdf_yaml`), keeping shared-models free of PyYAML runtime
@@ -428,7 +430,7 @@ yaml_str = dump_workflow(workflow)
 See `shared-models/examples/` for reference YAML files:
 
 - `invoice-processing.workflow.yaml` — realistic 4-node invoice processing pipeline
-- `all-node-types.workflow.yaml` — reference file demonstrating all 9 CLI-supported node types
+- `all-node-types.workflow.yaml` — reference file demonstrating all 11 CLI-supported node types
 - `linear-pipeline.workflow.yaml` — 3-node pipeline matching backend `linear_pipeline.json`
 - `rag-workflow.workflow.yaml` — 4-node RAG pipeline matching backend `rag_workflow.json`
 - `agent-review.workflow.yaml` — 4-node agent + human review pipeline matching backend `agent_review.json`
