@@ -138,7 +138,7 @@ python scripts/release/validate_release.py --package models
 python scripts/release/validate_release.py --package all
 
 # Validate against a specific tag
-python scripts/release/validate_release.py --package cli --tag "cli-v0.1.0"
+python scripts/release/validate_release.py --package cli --tag "cli-v0.1.1"
 ```
 
 Tests covering these checks live in `tests/test_release_validation.py`.

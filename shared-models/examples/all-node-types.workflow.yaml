@@ -61,6 +61,10 @@ nodes:
     config:
       agent_name: YOUR_AGENT_NAME
       primaryInput: "{{text_input.output.text}}"
+      # Optional flags:
+      # use_rlm: true             # route through the RLM (beta) runner
+      # max_iterations: 20        # RLM loop budget per node (1-100, default 20)
+      # web_tools_enabled: true   # attach web_search / web_fetch tools
 
   rag_node:
     type: rag_agent
