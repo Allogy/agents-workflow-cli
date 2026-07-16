@@ -11,7 +11,7 @@ Tech stack: Python 3.13, Typer, Rich, httpx.
 ```bash
 uv sync --all-groups                          # Install all dependencies
 uv run workflow --help                        # CLI usage
-uv run workflow validate <file.yaml>          # Offline validation (10 checks)
+uv run workflow validate <file.yaml>          # Offline validation (13 checks)
 uv run workflow push <file.yaml>              # Deploy with lockfile
 uv run workflow pull <uuid-or-name>           # Export to YAML
 uv run workflow init                          # Scaffold from templates
@@ -40,7 +40,7 @@ make codeartifact-publish-models              # Publish shared models
 
 For deep-dives, read the referenced docs:
 - `docs/init-command.md` — scaffold workflows from 7 templates
-- `docs/validate-command.md` — 10 offline validation checks
+- `docs/validate-command.md` — 13 offline/registry validation checks
 - `docs/push-command.md` — deploy with lockfile and dependency resolution
 - `docs/pull-command.md` — export workflows to YAML
 - `docs/run-command.md` — execute workflows via Temporal
@@ -50,6 +50,7 @@ For deep-dives, read the referenced docs:
 - `docs/sse-events.md` — SSE event types during streaming execution
 - `docs/temporal-execution.md` — Temporal execution lifecycle and modes
 - `docs/codeartifact.md` — CodeArtifact publishing guide
+- `docs_agent/README.md` — WDF syntax, node types, variables (authoring reference)
 - `shared-models/README.md` — shared Pydantic models package
 
 ### Directory Structure
@@ -78,7 +79,7 @@ shared-models/src/workflow_models/
 
 ### Key Conventions
 
-- **WDF (Workflow Definition Format):** Human-authored YAML with slug-based node references, variable templates (`{{slug.output.field}}`), and 10 node types (9 CLI-supported + document_extraction).
+- **WDF (Workflow Definition Format):** Human-authored YAML with slug-based node references, variable templates (`{{slug.output.field}}`), and **12 schema node types** (**11 CLI-supported**; `document_extraction` is schema-only).
 - **Lockfile (`.workflow.lock`):** Tracks slug-to-UUID mappings for idempotent deploys. 3-tier dependency resolution: UUID passthrough, lockfile cache, API lookup.
 - **API client:** `WorkflowClient` using httpx with `X-API-Key` auth. Config precedence: CLI flags, env vars, `~/.workflow/config.yaml`, defaults.
 - **Shared models (`shared-models/`):** Pure Pydantic v2 with zero SQLAlchemy dependency. Contains API schemas (`schemas/`) and WDF models (`wdf/`). Published as `agents-workflow-models` to CodeArtifact.

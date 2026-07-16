@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `workflow validate` command performs offline validation of `.workflow.yaml` files with no API calls. It runs 10 comprehensive checks to catch errors early in the authoring process.
+The `workflow validate` command performs offline validation of `.workflow.yaml` files. Most checks need no API calls. It runs **13 validation checks** (plus 4 synthetic breakdown rows in the results table when schema validation passes).
 
 ## Installation
 
@@ -20,6 +20,8 @@ uv run workflow validate <path-to-workflow-file>
 # Examples
 uv run workflow validate my-workflow.workflow.yaml
 uv run workflow validate shared-models/examples/linear-pipeline.workflow.yaml
+# Offline only (skips registry-powered checks 11–13)
+uv run workflow validate my-workflow.workflow.yaml --offline
 ```
 
 ## Exit Codes
@@ -36,33 +38,39 @@ uv run workflow validate workflows/*.workflow.yaml || exit 1
 
 ## Validation Checks
 
-The command runs 10 validation checks:
+The command runs **13 validation checks**. Checks **11–13** require the node registry (fetched from the API on first run, then cached). Use `--offline` to skip them (reported as `SKIP`).
 
 | # | Check | What It Does | Status Type |
 |---|-------|--------------|-------------|
 | 1 | **YAML Syntax** | Validates YAML is well-formed (with line numbers on error) | FAIL |
-| 2 | **WDF Schema Conformance** | Validates against Pydantic models (structure, types, required fields) | FAIL |
-| 3 | **Node Type Recognition** | Ensures all node types are valid (10 supported types) | FAIL |
-| 4 | **Edge References** | Ensures edge `from`/`to` reference existing nodes | FAIL |
-| 5 | **Entry/Exit Points** | Ensures entry/exit reference existing nodes | FAIL |
+| 2 | **WDF Schema Conformance** | Validates against Pydantic models (structure, types, required fields). Also covers checks 3, 5, and 9 below. | FAIL |
+| 3 | **Node Type Recognition** | Ensures all node types are known (12 schema types) | FAIL* |
+| 4 | **Edge References** | Ensures edge `from`/`to` reference existing nodes | FAIL* |
+| 5 | **Entry/Exit Points** | Ensures entry/exit reference existing nodes | FAIL* |
 | 6 | **Graph Reachability** | Ensures all nodes are reachable from entry via DFS | FAIL |
 | 7 | **Cycle Detection** | Detects circular dependencies (DFS 3-color algorithm, excludes RECURSIVE edges) | FAIL |
-| 8 | **Variable References** | Validates `{{slug.output.field}}` references point to existing nodes | FAIL |
-| 9 | **Node Config Validation** | Validates node-type-specific config (e.g., LLM_CALL requires `model` and `template`) | FAIL |
-| 10 | **Unsupported Node Types** | Detects use of node types not supported by the CLI (e.g., `document_extraction`) | FAIL |
+| 8 | **Variable References** | Validates `{{slug.output.field}}` references point to existing upstream nodes | FAIL |
+| 9 | **Node Config Validation** | Validates node-type-specific config (e.g., LLM_CALL requires `model` and `template`) | FAIL* |
+| 10 | **Unsupported Node Types** | Detects node types not supported by the CLI (currently `document_extraction`) | FAIL |
+| 11 | **Output Variable Paths** | Validates referenced `output.<field>` paths against the platform registry | FAIL / SKIP |
+| 12 | **Inactive Node Types** | Warns when the workflow uses registry-inactive node types | WARN / SKIP |
+| 13 | **Field Coverage** | Compares WDF config fields to registry schema (drift detection) | WARN / SKIP |
+
+\*Rows 3, 4, 5, and 9 are reported separately in the output table for clarity when check 2 passes; they are enforced inside WDF schema conformance.
 
 ### Status Types
 
 - **✓ PASS** (green) — Check passed
 - **⚠ WARN** (yellow) — Non-blocking warning; workflow can still be pushed
 - **✗ FAIL** (red) — Blocking error that prevents workflow execution
+- **- SKIP** (dim) — Registry-powered check skipped (`--offline` or no registry cache)
 
 ### Check 10: Unsupported Node Types
 
-Verifies that no nodes use types that are not supported by the CLI.
+Verifies that no nodes use types that are not supported by the CLI for `push` / `run`.
 
 Currently unsupported types:
-- `document_extraction` — legacy node type not supported for CLI execution
+- `document_extraction` — legacy node type; schema-valid but not deployable via CLI
 
 **Status:** FAIL if any unsupported node types are found.
 
@@ -70,6 +78,16 @@ Currently unsupported types:
 ```
 FAIL  Unsupported Node Types  Unsupported node types found: extract (document_extraction)
 ```
+
+### Checks 11–13: Registry-powered (optional offline)
+
+When registry data is available (default: cached from `workflow registry refresh` or auto-fetched on first validate):
+
+- **Output Variable Paths** — FAIL if a `{{slug.output.field}}` references an unknown output path for that node type
+- **Inactive Node Types** — WARN if a node type is marked inactive in the registry
+- **Field Coverage** — WARN if WDF config fields drift from the registry schema
+
+With `--offline`, these three checks report `SKIP`.
 
 ## Output Format
 
@@ -87,13 +105,16 @@ Validating: my-workflow.workflow.yaml
 │ Cycle Detection        │ ✗ FAIL │ Cycle detected: a -> b -> a │
 │ Variable References    │ ✓ PASS │                           │
 │ Unsupported Node Types │ ✓ PASS │                           │
+│ Output Variable Paths  │ ✓ PASS │                           │
+│ Inactive Node Types    │ ✓ PASS │                           │
+│ Field Coverage         │ ✓ PASS │                           │
 │ Node Type Recognition  │ ✓ PASS │                           │
 │ Edge References        │ ✓ PASS │                           │
 │ Entry/Exit Points      │ ✓ PASS │                           │
 │ Node Config Validation │ ✓ PASS │                           │
 └────────────────────────┴────────┴───────────────────────────┘
 
-Validation failed: 1 failures, 0 warnings, 9 passed
+Validation failed: 1 failures, 0 warnings, 0 skipped, 16 passed
 ```
 
 ## Common Validation Errors
@@ -115,7 +136,7 @@ Schema validation failed:
 nodes.my_node.type: Input should be 'plain_txt_input', 'structured_input', ...
 ```
 
-**Fix:** Use one of the 10 supported node types (see `VALID_NODE_TYPES`)
+**Fix:** Use one of the 12 WDF node types (11 CLI-supported). See `shared-models/src/workflow_models/wdf/nodes.py` (`VALID_NODE_TYPES`) or [`docs_agent/02-node-types-reference.md`](../docs_agent/02-node-types-reference.md).
 
 ### 3. Cycle Detected
 
@@ -202,7 +223,7 @@ entry: input
 exit: output
 ```
 
-**Result:** All 10 checks pass ✓
+**Result:** All checks pass ✓
 
 ### Example 2: Workflow with Cycle
 
@@ -264,7 +285,7 @@ entry: a
 exit: c
 ```
 
-**Result:** All 10 checks pass ✓ (recursive edges are excluded from cycle detection)
+**Result:** All checks pass ✓ (recursive edges are excluded from cycle detection)
 
 ## Integration with CI/CD
 
@@ -336,10 +357,10 @@ uv run workflow validate my-workflow.yaml
 
 ## Related Documentation
 
+- [WDF agent docs index](../docs_agent/README.md)
 - [Workflow Definition Format (WDF) Spec](../shared-models/README.md)
-- [Node Type Reference](../shared-models/src/workflow_models/wdf/nodes.py)
+- [Node Type Reference](../docs_agent/02-node-types-reference.md)
 - [Example Workflows](../shared-models/examples/)
-- [API Client Usage](./README.md#api-client)
 
 ## Implementation Details
 

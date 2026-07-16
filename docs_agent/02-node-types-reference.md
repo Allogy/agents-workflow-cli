@@ -1,6 +1,8 @@
 # Node Types Reference
 
-There are 10 active node types available for building workflows. Each has a specific purpose, execution mode, and config schema.
+The WDF schema defines **12 node types**. **11 are CLI-supported** (`validate`, `push`, `run`). The twelfth — `document_extraction` — is documented below for schema completeness but is **not** deployable via the CLI.
+
+Each type has a specific purpose, execution mode, and config schema. Several execution nodes also accept optional `saveToMemory` / `memoryFilePath` fields (additive run-memory copy). Those fields are forwarded at push time even when not listed on the strict Pydantic config model.
 
 ## Input Nodes
 
@@ -143,6 +145,8 @@ Config fields:
 | `temperature` | float | No | Override the agent's default temperature. |
 | `maxTokens` | integer | No | Override the agent's default max tokens. |
 | `system_prompt` | string | No | Override the agent's default system prompt. |
+| `use_rlm` | boolean | No | When `true`, route execution through the RLM (beta) sandbox runner instead of the standard agent loop. |
+| `web_tools_enabled` | boolean | No | When `true`, attach `web_search` / `web_fetch` tools to the agent for this node. |
 | `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
 | `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
@@ -249,6 +253,43 @@ Config fields:
 | `saveToMemory` | boolean | No | When `true`, on top of the normal output, also write a JSON copy of it to a file in the run's memory scope. Additive — the normal output is unaffected. Defaults to `false`. |
 | `memoryFilePath` | string | No | Templated relative path under the run memory scope for the additive copy. Defaults to `{node_id}/output.json` when omitted. Only used when `saveToMemory` is `true`. |
 
+### document_extraction
+
+> **CLI unsupported.** Valid in the WDF schema and recognized by `workflow validate` step 2, but check 10 (Unsupported Node Types) fails. Author these nodes in the Builder UI or via the API.
+
+Extracts structured fields from documents using a field list and optional extraction settings.
+
+- **Execution mode:** MESSAGES
+- **When to use:** Legacy structured extraction pipelines (prefer `structured_output` or `llm_call` for new workflows).
+
+```yaml
+extract_invoice:
+  type: document_extraction
+  execution_mode: MESSAGES
+  label: Extract Invoice Fields
+  config:
+    fields:
+      - name: vendor_name
+        type: string
+        required: true
+      - name: total_amount
+        type: number
+        required: true
+    extractionMethod: llm
+    prompt: Extract the listed fields from the uploaded document.
+    extractTables: false
+    extractImages: false
+```
+
+Config fields:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `fields` | list[object] | No | Fields to extract. Each entry: `name`, `type`, `required` (boolean). |
+| `extractionMethod` | string | No | Extraction backend hint. |
+| `prompt` | string | No | Instructions for the extraction step. |
+| `extractTables` | boolean | No | Include table extraction when supported. |
+| `extractImages` | boolean | No | Include image extraction when supported. |
+
 ## Human Interaction Nodes
 
 ### human_review
@@ -319,16 +360,7 @@ Config fields:
 | `headers` | map of string to string | No | Templated per-request HTTP headers (e.g. `authorization: 'Bearer {{get_token.output.access_token}}'`). Merged by the executor with the connector's auth headers, where connector auth wins on collision. |
 | `callParams` | map of string to string | No | Templated query/call parameters (e.g. a `from`/`to` date window) forwarded to the planner. |
 
-When `saveToMemory` is `true`, the node exposes the response as a memory file rather than inline text. Feed the resulting file into a downstream `memory_file_url` node to produce a signed download URL:
-
-```yaml
-transcript_url:
-  type: memory_file_url
-  execution_mode: OUTPUT
-  label: Transcript Download Link
-  config:
-    path: "{{fetch_transcript.output.memory_file_path}}"
-```
+When `saveToMemory` is `true`, the node exposes the response as a memory file rather than inline text. Feed the resulting path into a downstream `memory_file_url` node (see below) to produce a signed download URL.
 
 See `03-variable-references.md` for the `output.memory_file_path`, `output.memory_file_url`, `output.content_type`, `output.size_bytes`, and `output.status_code` paths exposed by this node.
 
@@ -351,3 +383,26 @@ fetch_pokemon:
 ```
 
 Each mapped `variable` is then available downstream as `{{fetch_pokemon.output.primary_type}}` and `{{fetch_pokemon.output.base_experience}}`. The `jsonPath` uses [glom](https://glom.readthedocs.io/) syntax: dotted keys (`data.results`) and bracketed list indices (`types[0]`).
+
+### memory_file_url
+
+Produces a signed download URL for a file in the run's memory scope (RLM sandbox memory bucket).
+
+- **Execution mode:** OUTPUT
+- **When to use:** End users or downstream nodes need a clickable link for a file written by `api_consumption` (`saveToMemory`), `file_upload` (`saveToMemory`), or an execution node with additive `saveToMemory`.
+
+```yaml
+transcript_url:
+  type: memory_file_url
+  execution_mode: OUTPUT
+  label: Transcript Download Link
+  config:
+    path: "{{fetch_transcript.output.memory_file_path}}"
+```
+
+Config fields:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | Yes | Relative path under the org memory root (e.g. `outputs/report.pdf`). May use `{{slug.output.field}}` templates. Must be relative — absolute paths and `..` segments are rejected. |
+
+Output paths: `output.url`, `output.filename`. See `03-variable-references.md`.

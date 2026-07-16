@@ -103,9 +103,15 @@ See the Variable References document for the valid output paths per node type.
 | Mode | Used By | Description |
 |------|---------|-------------|
 | `INPUT` | plain_txt_input, structured_input, file_upload | Pauses workflow for user input |
-| `MESSAGES` | llm_call, agent, rag_agent | LLM/agent processing with message history |
-| `OUTPUT` | structured_output | Produces validated structured data |
+| `MESSAGES` | llm_call, agent, rag_agent, api_consumption | LLM/agent processing or external API calls |
+| `OUTPUT` | structured_output, memory_file_url | Produces structured data or a signed file URL |
 | `FLOW` | retrieve, human_review | Control flow or data retrieval step |
+
+## Node Type Summary
+
+The WDF schema recognizes **12 node types**. The CLI supports **11** for `validate` (offline), `push`, and `run`. The twelfth — `document_extraction` — passes schema validation but fails the unsupported-node check; use the Builder UI or API instead.
+
+See `02-node-types-reference.md` for per-type config and `docs/validate-command.md` for the full check list.
 
 ## Validation
 
