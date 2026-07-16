@@ -542,6 +542,7 @@ class TestBuildNodeParameters:
             'model': 'us.anthropic.claude-sonnet-4-20250514-v1:0',
             'temperature': 0.7,
             'maxTokens': 2048,
+            'max_iterations': 50,
             'primaryInput': '{{input.output.text}}',
         }
         node_def = NodeDefinition.model_construct(
@@ -554,6 +555,7 @@ class TestBuildNodeParameters:
         assert params['type'] == 'agent'
         assert params['agentId'] == node_config['agent_id']
         assert params['model'] == 'us.anthropic.claude-sonnet-4-20250514-v1:0'
+        assert params['max_iterations'] == 50
         assert 'systemPrompt' not in params
         assert params['primaryInput'] == '{{input.output.text}}'
 

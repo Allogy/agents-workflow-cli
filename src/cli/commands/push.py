@@ -362,6 +362,8 @@ def build_node_parameters(
             params['use_rlm'] = node_config['use_rlm']
         if 'web_tools_enabled' in node_config:
             params['web_tools_enabled'] = node_config['web_tools_enabled']
+        if 'max_iterations' in node_config:
+            params['max_iterations'] = node_config['max_iterations']
         for key in ('saveToMemory', 'memoryFilePath'):
             if key in node_config:
                 params[key] = node_config[key]

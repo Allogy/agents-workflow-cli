@@ -19,10 +19,26 @@ from workflow_models.enums import (
 
 
 class TestNodeConfigType:
-    """NodeConfigType should have all 16 node types (incl. CHAT_INPUT, API_CONSUMPTION)."""
+    """NodeConfigType should expose the expected node type names."""
 
-    def test_has_16_values(self):
-        assert len(NodeConfigType) == 16
+    def test_has_expected_member_names(self):
+        assert {member.name for member in NodeConfigType} == {
+            'AGENT',
+            'API_CONSUMPTION',
+            'CHAT_INPUT',
+            'DOCUMENT_EXTRACTION',
+            'FILE_UPLOAD',
+            'HUMAN_REVIEW',
+            'ITERATOR',
+            'LLM_CALL',
+            'MEMORY_FILE_URL',
+            'PLAIN_TXT_INPUT',
+            'RAG_AGENT',
+            'RETRIEVE',
+            'SELECTION',
+            'STRUCTURED_INPUT',
+            'STRUCTURED_OUTPUT',
+        }
 
     def test_integration_nodes(self):
         assert NodeConfigType.API_CONSUMPTION == 'API_CONSUMPTION'

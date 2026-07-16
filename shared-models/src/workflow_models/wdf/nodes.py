@@ -149,6 +149,12 @@ class AgentConfig(BaseModel):
     system_prompt: str | None = None
     use_rlm: bool | None = None
     web_tools_enabled: bool | None = None
+    max_iterations: int | None = Field(
+        default=None,
+        gt=0,
+        le=100,
+        description='Max RLM iterations per agent node execution (default: 20, max: 100)',
+    )
 
 
 class RagAgentConfig(BaseModel):

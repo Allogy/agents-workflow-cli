@@ -97,7 +97,7 @@ from workflow_models.wdf import (
 | `PlainTxtInputConfig` | `PLAIN_TXT_INPUT` | Plain text input with optional placeholder |
 | `StructuredInputConfig` | `STRUCTURED_INPUT` | JSON-schema-driven form input |
 | `FileUploadConfig` | `FILE_UPLOAD` | File upload with accepted types and size limits |
-| `AgentConfig` | `AGENT` | LLM agent with model, temperature, system prompt, optional `use_rlm` flag to route through the RLM (beta) runner, optional `web_tools_enabled` flag to attach `web_search` / `web_fetch` tools |
+| `AgentConfig` | `AGENT` | LLM agent with model, temperature, system prompt, optional `use_rlm` flag to route through the RLM (beta) runner, optional `web_tools_enabled` flag to attach `web_search` / `web_fetch` tools, optional `max_iterations` (int, 1-100, default 20) to cap RLM loop iterations |
 | `RagAgentConfig` | `RAG_AGENT` | RAG-enhanced agent with retrieval parameters |
 | `LlmCallConfig` | `LLM_CALL` | Direct LLM invocation (no agent loop) |
 | `StructuredOutputConfig` | `STRUCTURED_OUTPUT` | Render structured data via template |

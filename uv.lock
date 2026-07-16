@@ -4,7 +4,7 @@ requires-python = ">=3.13, <4.0"
 
 [[package]]
 name = "agents-workflow-cli"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "agents-workflow-models" },
@@ -45,7 +45,7 @@ dev = [
 
 [[package]]
 name = "agents-workflow-models"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "shared-models" }
 dependencies = [
     { name = "pydantic" },
